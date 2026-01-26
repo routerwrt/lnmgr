@@ -138,6 +138,34 @@ static void test_disable_node(void)
 }
 
 /*
+ * Test 6: simple dependency cycle A <-> B
+ */
+static void test_simple_cycle(void)
+{
+    struct graph *g = graph_create();
+
+    graph_add_node(g, "A", NODE_DEVICE);
+    graph_add_node(g, "B", NODE_DEVICE);
+
+    graph_add_require(g, "A", "B");
+    graph_add_require(g, "B", "A");
+
+    graph_enable_node(g, "A");
+    graph_enable_node(g, "B");
+
+    graph_evaluate(g);
+
+    struct node *A = graph_find_node(g, "A");
+    struct node *B = graph_find_node(g, "B");
+
+    assert(A->state == NODE_FAILED);
+    assert(B->state == NODE_FAILED);
+
+    graph_destroy(g);
+    printf("test_simple_cycle: OK\n");
+}
+
+/*
  * Main test runner
  */
 int main(void)
@@ -146,6 +174,7 @@ int main(void)
     test_simple_dependency();
     test_blocked_dependency();
     test_diamond_dependency();
+    test_simple_cycle();
     test_disable_node();
 
     printf("All graph tests passed.\n");

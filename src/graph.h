@@ -23,6 +23,12 @@ typedef enum {
     NODE_SERVICE
 } node_type_t;
 
+typedef enum {
+    DFS_WHITE = 0,
+    DFS_GRAY,
+    DFS_BLACK
+} dfs_mark_t;
+
 struct node;
 
 /*
@@ -41,6 +47,7 @@ struct node {
     node_type_t     type;
     bool            enabled;
     node_state_t    state;
+    dfs_mark_t      dfs;
 
     struct require *requires;
 

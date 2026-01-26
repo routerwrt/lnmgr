@@ -8,6 +8,25 @@
  * Internal helpers
  */
 
+static bool dfs_cycle(struct node *n)
+{
+    if (n->dfs == DFS_GRAY)
+        return true; /* back-edge → cycle */
+
+    if (n->dfs == DFS_BLACK)
+        return false;
+
+    n->dfs = DFS_GRAY;
+
+    for (struct require *r = n->requires; r; r = r->next) {
+        if (dfs_cycle(r->node))
+            return true;
+    }
+
+    n->dfs = DFS_BLACK;
+    return false;
+}
+
 static struct node *node_create(const char *id, node_type_t type)
 {
     struct node *n = calloc(1, sizeof(*n));
@@ -195,13 +214,29 @@ static bool requirements_met(struct node *n)
 
 void graph_evaluate(struct graph *g)
 {
-    bool progress;
+    /* reset DFS marks */
+    for (struct node *n = g->nodes; n; n = n->next)
+        n->dfs = DFS_WHITE;
 
+    /* detect cycles */
+    for (struct node *n = g->nodes; n; n = n->next) {
+        if (n->enabled && n->dfs == DFS_WHITE) {
+            if (dfs_cycle(n)) {
+                /* mark all enabled nodes as FAILED */
+                for (struct node *m = g->nodes; m; m = m->next) {
+                    if (m->enabled)
+                        m->state = NODE_FAILED;
+                }
+                return;
+            }
+        }
+    }
+
+    /* existing evaluation logic */
+    bool progress;
     do {
         progress = false;
-
         for (struct node *n = g->nodes; n; n = n->next) {
-
             if (!n->enabled)
                 continue;
 
@@ -212,6 +247,5 @@ void graph_evaluate(struct graph *g)
                 progress = true;
             }
         }
-
     } while (progress);
 }
