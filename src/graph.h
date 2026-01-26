@@ -19,6 +19,7 @@ typedef enum {
  */
 typedef enum {
     NODE_DEVICE = 0,
+    NODE_BRIDGE,
     NODE_TRANSFORMER,
     NODE_SERVICE
 } node_type_t;

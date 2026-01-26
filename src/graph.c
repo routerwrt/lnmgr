@@ -50,6 +50,7 @@ static struct node *node_create(const char *id, node_type_t type)
     n->visited = false;
     n->next = NULL;
     n->fail_reason = FAIL_NONE;
+    n->actions = (struct action_ops *)action_ops_for_type(type);
 
     return n;
 }
