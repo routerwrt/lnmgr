@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <unistd.h>
 #include <errno.h>
+#include <string.h>
 #include <stdbool.h>
 
 /* sockets */
@@ -29,12 +30,31 @@ int signals_handle_netlink(struct graph *g, int nl_fd);
  * - no sockets
  */
 
+static int nl_fd = -1;
 static volatile sig_atomic_t running = 1;
 
 static void on_sigint(int sig)
 {
     (void)sig;
     running = 0;
+
+    if (nl_fd >= 0) {
+        close(nl_fd);
+        nl_fd = -1;
+    }
+}
+
+static void setup_signals(void)
+{
+    struct sigaction sa;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = on_sigint;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;   /* NO SA_RESTART */
+
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
 }
 
 static int open_rtnetlink(void)
@@ -65,6 +85,8 @@ int main(int argc, char **argv)
 
     const char *ifname = argv[1];
 
+    setup_signals();
+
     signal(SIGINT, on_sigint);
     signal(SIGTERM, on_sigint);
 
@@ -86,7 +108,8 @@ int main(int argc, char **argv)
 
     printf("lnmgr: graph evaluated, running (Ctrl+C to exit)\n");
 
-    int nl_fd = open_rtnetlink();
+    
+    nl_fd = open_rtnetlink();
     if (nl_fd < 0) {
         perror("netlink");
         return 1;

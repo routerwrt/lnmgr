@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -31,8 +32,11 @@ int signals_handle_netlink(struct graph *g, int nl_fd)
     };
 
     ssize_t len = recvmsg(nl_fd, &msg, 0);
-    if (len <= 0)
-        return -1;
+    if (len < 0) {
+        if (errno == EINTR)
+                return 0;      /* interrupted, loop will exit */
+        return -1;         /* EBADF or real error */
+    }
 
     for (struct nlmsghdr *nh = (struct nlmsghdr *)buf;
          NLMSG_OK(nh, len);
