@@ -4,6 +4,10 @@
 
 #include "../src/graph.h"
 
+/* action tests */
+void test_action_success(void);
+void test_action_failure(void);
+
 /*
  * Test 1: single node enable
  */
@@ -294,6 +298,10 @@ int main(void)
     test_signal_blocks();
     test_dependency_before_signal();
     test_disable_node();
+
+    /* action tests */
+    test_action_success();
+    test_action_failure();
 
     printf("All graph tests passed.\n");
     return 0;
