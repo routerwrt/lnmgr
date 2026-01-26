@@ -247,6 +247,12 @@ int graph_disable_node(struct graph *g, const char *id)
     if (!n)
         return -1;
 
+    if (n->state == NODE_ACTIVE &&
+        n->actions &&
+        n->actions->deactivate) {
+        n->actions->deactivate(n);
+    }
+
     n->enabled = false;
     n->state = NODE_INACTIVE;
     return 0;
@@ -315,11 +321,24 @@ void graph_evaluate(struct graph *g)
             if (!n->enabled)
                 continue;
 
-            if (n->state == NODE_WAITING &&
-                node_ready(n)) {
+            if (n->state == NODE_WAITING && node_ready(n)) {
 
-                n->state = NODE_ACTIVE;
-                progress = true;
+                if (!n->actions || !n->actions->activate) {
+                    /* no action needed: logical node */
+                    n->state = NODE_ACTIVE;
+                    progress = true;
+                    continue;
+                }
+
+                action_result_t r = n->actions->activate(n);
+
+                if (r == ACTION_OK) {
+                    n->state = NODE_ACTIVE;
+                    progress = true;
+                } else {
+                    n->state = NODE_FAILED;
+                    n->fail_reason = FAIL_ACTION;
+                }
             }
         }
 

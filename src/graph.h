@@ -31,7 +31,8 @@ typedef enum {
 
 typedef enum {
     FAIL_NONE = 0,
-    FAIL_CYCLE
+    FAIL_CYCLE,
+    FAIL_ACTION
 } fail_reason_t;
 
 typedef enum {
@@ -41,6 +42,11 @@ typedef enum {
     EXPLAIN_SIGNAL,
     EXPLAIN_FAILED
 } explain_type_t;
+
+typedef enum {
+    ACTION_OK = 0,
+    ACTION_FAIL
+} action_result_t;
 
 struct explain {
     explain_type_t type;
@@ -55,6 +61,11 @@ struct signal {
 
 struct node;
 
+struct action_ops {
+    action_result_t (*activate)(struct node *n);
+    void (*deactivate)(struct node *n);
+};
+
 /*
  * Dependency edge
  */
@@ -67,20 +78,21 @@ struct require {
  * Graph node
  */
 struct node {
-    char            *id;
-    node_type_t     type;
-    bool            enabled;
-    node_state_t    state;
-    struct signal   *signals;
+    char                *id;
+    node_type_t         type;
+    bool                enabled;
+    node_state_t        state;
+    struct signal       *signals;
+    struct action_ops   *actions;
 
-    fail_reason_t   fail_reason;
+    fail_reason_t       fail_reason;
 
-    struct require  *requires;
+    struct require      *requires;
 
     /* bookkeeping */
-    bool            visited;
-    dfs_mark_t      dfs;
-    struct node    *next;
+    bool                visited;
+    dfs_mark_t          dfs;
+    struct node         *next;
 };
 
 /*
