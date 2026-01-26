@@ -4,3 +4,4 @@
 *.swp
 *.tmp
 build/
+graph_tests
