@@ -66,6 +66,8 @@ struct action_ops {
     void (*deactivate)(struct node *n);
 };
 
+const struct action_ops *action_ops_for_type(node_type_t type);
+
 /*
  * Dependency edge
  */
