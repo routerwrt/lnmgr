@@ -40,6 +40,7 @@ static struct node *node_create(const char *id, node_type_t type)
     n->requires = NULL;
     n->visited = false;
     n->next = NULL;
+    n->fail_reason = FAIL_NONE;
 
     return n;
 }
@@ -224,8 +225,10 @@ void graph_evaluate(struct graph *g)
             if (dfs_cycle(n)) {
                 /* mark all enabled nodes as FAILED */
                 for (struct node *m = g->nodes; m; m = m->next) {
-                    if (m->enabled)
+                    if (m->enabled) {
                         m->state = NODE_FAILED;
+                        m->fail_reason = FAIL_CYCLE;
+                    }
                 }
                 return;
             }
@@ -248,4 +251,35 @@ void graph_evaluate(struct graph *g)
             }
         }
     } while (progress);
+}
+
+struct explain graph_explain_node(struct graph *g, const char *id)
+{
+    struct explain e = { EXPLAIN_NONE, NULL };
+    struct node *n = graph_find_node(g, id);
+
+    if (!n)
+        return e;
+
+    if (!n->enabled) {
+        e.type = EXPLAIN_DISABLED;
+        return e;
+    }
+
+    if (n->state == NODE_FAILED) {
+        e.type = EXPLAIN_FAILED;
+        return e;
+    }
+
+    if (n->state == NODE_WAITING) {
+        for (struct require *r = n->requires; r; r = r->next) {
+            if (r->node->state != NODE_ACTIVE) {
+                e.type = EXPLAIN_BLOCKED;
+                e.detail = r->node->id;
+                return e;
+            }
+        }
+    }
+
+    return e;
 }

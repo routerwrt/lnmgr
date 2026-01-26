@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "../src/graph.h"
 
@@ -165,6 +166,57 @@ static void test_simple_cycle(void)
     printf("test_simple_cycle: OK\n");
 }
 
+static void test_explain_disabled(void)
+{
+    struct graph *g = graph_create();
+    graph_add_node(g, "A", NODE_DEVICE);
+
+    struct explain e = graph_explain_node(g, "A");
+    assert(e.type == EXPLAIN_DISABLED);
+
+    graph_destroy(g);
+    printf("test_explain_disabled: OK\n");
+}
+
+static void test_explain_blocked(void)
+{
+    struct graph *g = graph_create();
+
+    graph_add_node(g, "A", NODE_DEVICE);
+    graph_add_node(g, "B", NODE_DEVICE);
+    graph_add_require(g, "B", "A");
+
+    graph_enable_node(g, "B");
+    graph_evaluate(g);
+
+    struct explain e = graph_explain_node(g, "B");
+    assert(e.type == EXPLAIN_BLOCKED);
+    assert(e.detail && strcmp(e.detail, "A") == 0);
+
+    graph_destroy(g);
+    printf("test_explain_blocked: OK\n");
+}
+
+static void test_explain_failed(void)
+{
+    struct graph *g = graph_create();
+
+    graph_add_node(g, "A", NODE_DEVICE);
+    graph_add_node(g, "B", NODE_DEVICE);
+    graph_add_require(g, "A", "B");
+    graph_add_require(g, "B", "A");
+
+    graph_enable_node(g, "A");
+    graph_enable_node(g, "B");
+    graph_evaluate(g);
+
+    struct explain e = graph_explain_node(g, "A");
+    assert(e.type == EXPLAIN_FAILED);
+
+    graph_destroy(g);
+    printf("test_explain_failed: OK\n");
+}
+
 /*
  * Main test runner
  */
@@ -175,6 +227,9 @@ int main(void)
     test_blocked_dependency();
     test_diamond_dependency();
     test_simple_cycle();
+    test_explain_disabled();
+    test_explain_blocked();
+    test_explain_failed();
     test_disable_node();
 
     printf("All graph tests passed.\n");

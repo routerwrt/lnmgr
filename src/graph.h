@@ -29,6 +29,23 @@ typedef enum {
     DFS_BLACK
 } dfs_mark_t;
 
+typedef enum {
+    FAIL_NONE = 0,
+    FAIL_CYCLE
+} fail_reason_t;
+
+typedef enum {
+    EXPLAIN_NONE = 0,
+    EXPLAIN_DISABLED,
+    EXPLAIN_BLOCKED,
+    EXPLAIN_FAILED
+} explain_type_t;
+
+struct explain {
+    explain_type_t type;
+    const char *detail;   /* node id causing block, or NULL */
+};
+
 struct node;
 
 /*
@@ -47,12 +64,14 @@ struct node {
     node_type_t     type;
     bool            enabled;
     node_state_t    state;
-    dfs_mark_t      dfs;
+
+    fail_reason_t   fail_reason;
 
     struct require *requires;
 
     /* bookkeeping */
     bool            visited;
+    dfs_mark_t      dfs;
     struct node    *next;
 };
 
@@ -91,5 +110,8 @@ int graph_disable_node(struct graph *g, const char *id);
 
 /* evaluation */
 void graph_evaluate(struct graph *g);
+
+struct explain graph_explain_node(struct graph *g, const char *id);
+
 
 #endif /* LNMGR_GRAPH_H */
