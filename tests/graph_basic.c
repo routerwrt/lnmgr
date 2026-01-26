@@ -217,6 +217,66 @@ static void test_explain_failed(void)
     printf("test_explain_failed: OK\n");
 }
 
+static void test_signal_blocks(void)
+{
+    struct graph *g = graph_create();
+
+    graph_add_node(g, "eth0", NODE_DEVICE);
+    graph_add_signal(g, "eth0", "carrier");
+
+    graph_enable_node(g, "eth0");
+    graph_evaluate(g);
+
+    struct node *n = graph_find_node(g, "eth0");
+    assert(n->state == NODE_WAITING);
+
+    struct explain e = graph_explain_node(g, "eth0");
+    assert(e.type == EXPLAIN_SIGNAL);
+    assert(strcmp(e.detail, "carrier") == 0);
+
+    graph_destroy(g);
+    printf("test_signal_blocks: OK\n");
+}
+
+static void test_signal_allows(void)
+{
+    struct graph *g = graph_create();
+
+    graph_add_node(g, "eth0", NODE_DEVICE);
+    graph_add_signal(g, "eth0", "carrier");
+
+    graph_enable_node(g, "eth0");
+    graph_set_signal(g, "eth0", "carrier", true);
+    graph_evaluate(g);
+
+    struct node *n = graph_find_node(g, "eth0");
+    assert(n->state == NODE_ACTIVE);
+
+    graph_destroy(g);
+    printf("test_signal_allows: OK\n");
+}
+
+static void test_dependency_before_signal(void)
+{
+    struct graph *g = graph_create();
+
+    graph_add_node(g, "A", NODE_DEVICE);
+    graph_add_node(g, "B", NODE_DEVICE);
+
+    graph_add_require(g, "B", "A");
+    graph_add_signal(g, "B", "ready");
+
+    graph_enable_node(g, "B");
+    graph_evaluate(g);
+
+    struct explain e = graph_explain_node(g, "B");
+    assert(e.type == EXPLAIN_BLOCKED);
+    assert(strcmp(e.detail, "A") == 0);
+
+    graph_destroy(g);
+    printf("test_dependency_before_signal: OK\n");
+}
+
 /*
  * Main test runner
  */
@@ -230,6 +290,9 @@ int main(void)
     test_explain_disabled();
     test_explain_blocked();
     test_explain_failed();
+    test_signal_allows();
+    test_signal_blocks();
+    test_dependency_before_signal();
     test_disable_node();
 
     printf("All graph tests passed.\n");

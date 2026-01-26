@@ -38,12 +38,19 @@ typedef enum {
     EXPLAIN_NONE = 0,
     EXPLAIN_DISABLED,
     EXPLAIN_BLOCKED,
+    EXPLAIN_SIGNAL,
     EXPLAIN_FAILED
 } explain_type_t;
 
 struct explain {
     explain_type_t type;
-    const char *detail;   /* node id causing block, or NULL */
+    const char *detail; /* blocking node id OR signal name */
+};
+
+struct signal {
+    const char *name;
+    bool value;
+    struct signal *next;
 };
 
 struct node;
@@ -60,14 +67,15 @@ struct require {
  * Graph node
  */
 struct node {
-    char           *id;
+    char            *id;
     node_type_t     type;
     bool            enabled;
     node_state_t    state;
+    struct signal   *signals;
 
     fail_reason_t   fail_reason;
 
-    struct require *requires;
+    struct require  *requires;
 
     /* bookkeeping */
     bool            visited;
@@ -113,5 +121,13 @@ void graph_evaluate(struct graph *g);
 
 struct explain graph_explain_node(struct graph *g, const char *id);
 
+int graph_add_signal(struct graph *g,
+                     const char *node_id,
+                     const char *signal);
+
+int graph_set_signal(struct graph *g,
+                     const char *node_id,
+                     const char *signal,
+                     bool value);
 
 #endif /* LNMGR_GRAPH_H */

@@ -27,6 +27,15 @@ static bool dfs_cycle(struct node *n)
     return false;
 }
 
+static struct signal *find_signal(struct node *n, const char *name)
+{
+    for (struct signal *s = n->signals; s; s = s->next) {
+        if (strcmp(s->name, name) == 0)
+            return s;
+    }
+    return NULL;
+}
+
 static struct node *node_create(const char *id, node_type_t type)
 {
     struct node *n = calloc(1, sizeof(*n));
@@ -51,6 +60,14 @@ static void node_destroy(struct node *n)
     while (r) {
         struct require *tmp = r;
         r = r->next;
+        free(tmp);
+    }
+
+    struct signal *s = n->signals;
+    while (s) {
+        struct signal *tmp = s;
+        s = s->next;
+        free((char *)tmp->name);
         free(tmp);
     }
 
@@ -120,6 +137,46 @@ int graph_del_node(struct graph *g, const char *id)
         pp = &(*pp)->next;
     }
     return -1;
+}
+
+int graph_add_signal(struct graph *g,
+                     const char *node_id,
+                     const char *signal)
+{
+    struct node *n = graph_find_node(g, node_id);
+    if (!n || !signal)
+        return -1;
+
+    if (find_signal(n, signal))
+        return -1;  /* duplicate */
+
+    struct signal *s = calloc(1, sizeof(*s));
+    if (!s)
+        return -1;
+
+    s->name = strdup(signal);
+    s->value = false;
+    s->next = n->signals;
+    n->signals = s;
+
+    return 0;
+}
+
+int graph_set_signal(struct graph *g,
+                     const char *node_id,
+                     const char *signal,
+                     bool value)
+{
+    struct node *n = graph_find_node(g, node_id);
+    if (!n)
+        return -1;
+
+    struct signal *s = find_signal(n, signal);
+    if (!s)
+        return -1;
+
+    s->value = value;
+    return 0;
 }
 
 /*
@@ -199,7 +256,7 @@ int graph_disable_node(struct graph *g, const char *id)
  * Evaluation logic
  *
  * NOTE:
- * - No signals yet
+ * 
  * - No actions yet
  * - Requirements must be ACTIVE
  */
@@ -211,6 +268,20 @@ static bool requirements_met(struct node *n)
             return false;
     }
     return true;
+}
+
+static bool signals_met(struct node *n)
+{
+    for (struct signal *s = n->signals; s; s = s->next) {
+        if (!s->value)
+            return false;
+    }
+    return true;
+}
+
+static bool node_ready(struct node *n)
+{
+    return requirements_met(n) && signals_met(n);
 }
 
 void graph_evaluate(struct graph *g)
@@ -239,17 +310,19 @@ void graph_evaluate(struct graph *g)
     bool progress;
     do {
         progress = false;
+
         for (struct node *n = g->nodes; n; n = n->next) {
             if (!n->enabled)
                 continue;
 
             if (n->state == NODE_WAITING &&
-                requirements_met(n)) {
+                node_ready(n)) {
 
                 n->state = NODE_ACTIVE;
                 progress = true;
             }
         }
+
     } while (progress);
 }
 
@@ -272,10 +345,21 @@ struct explain graph_explain_node(struct graph *g, const char *id)
     }
 
     if (n->state == NODE_WAITING) {
+
+        /* 1. dependencies first */
         for (struct require *r = n->requires; r; r = r->next) {
             if (r->node->state != NODE_ACTIVE) {
                 e.type = EXPLAIN_BLOCKED;
                 e.detail = r->node->id;
+                return e;
+            }
+        }
+
+        /* 2. then signals */
+        for (struct signal *s = n->signals; s; s = s->next) {
+            if (!s->value) {
+                e.type = EXPLAIN_SIGNAL;
+                e.detail = s->name;
                 return e;
             }
         }
