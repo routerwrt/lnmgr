@@ -1,9 +1,23 @@
+/* libc */
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <unistd.h>
+#include <errno.h>
+#include <stdbool.h>
 
+/* sockets */
+#include <sys/socket.h>
+
+/* linux netlink */
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
+
+/* project */
 #include "graph.h"
+
+
+int signals_handle_netlink(struct graph *g, int nl_fd);
 
 /*
  * Minimal lnmgr v0
@@ -21,6 +35,25 @@ static void on_sigint(int sig)
 {
     (void)sig;
     running = 0;
+}
+
+static int open_rtnetlink(void)
+{
+    int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+    if (fd < 0)
+        return -1;
+
+    struct sockaddr_nl sa = {
+        .nl_family = AF_NETLINK,
+        .nl_groups = RTMGRP_LINK,
+    };
+
+    if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+        close(fd);
+        return -1;
+    }
+
+    return fd;
 }
 
 int main(int argc, char **argv)
@@ -45,6 +78,7 @@ int main(int argc, char **argv)
 
     /* intent */
     graph_add_node(g, ifname, NODE_DEVICE);
+    graph_add_signal(g, ifname, "carrier");
     graph_enable_node(g, ifname);
 
     /* evaluate */
@@ -52,9 +86,18 @@ int main(int argc, char **argv)
 
     printf("lnmgr: graph evaluated, running (Ctrl+C to exit)\n");
 
-    /* idle loop */
+    int nl_fd = open_rtnetlink();
+    if (nl_fd < 0) {
+        perror("netlink");
+        return 1;
+    }
+
     while (running) {
-        pause();
+        int rc = signals_handle_netlink(g, nl_fd);
+        if (rc < 0) {
+                perror("signals_handle_netlink");
+                break;
+        }
     }
 
     printf("lnmgr: shutting down\n");
