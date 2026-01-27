@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
@@ -8,31 +9,71 @@
 
 #include "socket.h"
 #include "graph.h"
-#include "lnmgr_status.h"
 
-#define MAX_SUBSCRIBERS 16
-
-static int subscribers[MAX_SUBSCRIBERS];
-static int subscriber_count = 0;
+static struct subscriber *subscribers = NULL;
 
 static void add_subscriber(int fd)
 {
-    if (subscriber_count >= MAX_SUBSCRIBERS) {
+    struct subscriber *s = calloc(1, sizeof(*s));
+    if (!s) {
         close(fd);
         return;
     }
-    subscribers[subscriber_count++] = fd;
+
+    s->fd = fd;
+    s->next = subscribers;
+    subscribers = s;
 }
 
-static void drop_subscriber(int i)
+static void drop_subscriber(struct subscriber *prev, struct subscriber *s)
 {
-    close(subscribers[i]);
-    subscribers[i] = subscribers[--subscriber_count];
+    if (prev)
+        prev->next = s->next;
+    else
+        subscribers = s->next;
+
+    close(s->fd);
+    free(s);
 }
 
 void socket_add_subscriber(int fd)
 {
     add_subscriber(fd);
+}
+
+static struct lnmgr_explain *
+subscriber_last(struct subscriber *s, struct node *n)
+{
+    struct node_state *st;
+
+    for (st = s->states; st; st = st->next) {
+        if (strcmp(st->id, n->id) == 0)
+            return &st->last;
+    }
+
+    st = calloc(1, sizeof(*st));
+    st->id = strdup(n->id);
+    st->last.status = LNMGR_STATUS_UNKNOWN;
+    st->next = s->states;
+    s->states = st;
+
+    return &st->last;
+}
+
+static void socket_send_event(int fd,
+                              const char *id,
+                              const struct lnmgr_explain *ex)
+{
+    const char *state = lnmgr_status_to_str(ex->status);
+    const char *code  = lnmgr_code_to_str(ex->code);
+
+    dprintf(fd,
+        "{ \"type\": \"event\", \"id\": \"%s\", \"state\": \"%s\"%s%s }\n",
+        id,
+        state,
+        code ? ", \"code\": \"" : "",
+        code ? code : ""
+    );
 }
 
 static void notify_subscribers(struct graph *g, bool admin_up)
@@ -187,9 +228,10 @@ static void reply_snapshot(int fd, struct graph *g)
             n->id,
             lnmgr_status_to_str(lex.status));
 
-        if (lex.code)
-            dprintf(fd, ", \"code\": \"%s\"", lex.code);
-
+        const char *code = lnmgr_code_to_str(lex.code);
+        if (code)
+                dprintf(fd, ", \"code\": \"%s\"", code);    
+ 
         dprintf(fd, " }");
     }
 

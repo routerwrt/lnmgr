@@ -1,11 +1,19 @@
 #ifndef LNMGR_SOCKET_H
 #define LNMGR_SOCKET_H
 
+#include "lnmgr_status.h"
+
 struct graph;
 
 struct subscriber {
     int fd;
-    struct lnmgr_explain *last; /* array indexed by node */
+
+    struct node_state {
+        char *id;
+        struct lnmgr_explain last;
+        struct node_state *next;
+    } *states;
+
     struct subscriber *next;
 };
 
