@@ -16,9 +16,7 @@
 
 /* project */
 #include "graph.h"
-
-
-int signals_handle_netlink(struct graph *g, int nl_fd);
+#include "lnmgr_status.h"
 
 /*
  * Minimal lnmgr v0
@@ -30,8 +28,31 @@ int signals_handle_netlink(struct graph *g, int nl_fd);
  * - no sockets
  */
 
+int signals_handle_netlink(struct graph *g, int nl_fd,
+                           const char *watch_if,
+                           bool *admin_up_out);
+
 static int nl_fd = -1;
 static volatile sig_atomic_t running = 1;
+
+static int netlink_request_getlink(int nl_fd)
+{
+    struct {
+        struct nlmsghdr nh;
+        struct ifinfomsg ifm;
+    } req;
+
+    memset(&req, 0, sizeof(req));
+
+    req.nh.nlmsg_len   = NLMSG_LENGTH(sizeof(struct ifinfomsg));
+    req.nh.nlmsg_type  = RTM_GETLINK;
+    req.nh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    req.nh.nlmsg_seq   = 1;
+
+    req.ifm.ifi_family = AF_UNSPEC;
+
+    return send(nl_fd, &req, req.nh.nlmsg_len, 0);
+}
 
 static void on_sigint(int sig)
 {
@@ -97,17 +118,24 @@ int main(int argc, char **argv)
         fprintf(stderr, "lnmgr: failed to create graph\n");
         return 1;
     }
+    /* for testing only - until config parser done*/
+    /* testing-only heuristic */
+    bool require_carrier = strncmp(ifname, "eth", 3) == 0;
 
     /* intent */
     graph_add_node(g, ifname, NODE_DEVICE);
-    graph_add_signal(g, ifname, "carrier");
+
+    /* policy (temporary, until config exists) */
+    if (require_carrier) {
+       graph_add_signal(g, ifname, "carrier");
+    }
+
     graph_enable_node(g, ifname);
 
     /* evaluate */
     graph_evaluate(g);
 
     printf("lnmgr: graph evaluated, running (Ctrl+C to exit)\n");
-
     
     nl_fd = open_rtnetlink();
     if (nl_fd < 0) {
@@ -115,12 +143,37 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    while (running) {
-        int rc = signals_handle_netlink(g, nl_fd);
+    if (netlink_request_getlink(nl_fd) < 0) {
+        perror("RTM_GETLINK");
+        return 1;
+    }
+    /* Initial link state sync */
+    bool admin_up = false;
+
+    for (;;) {
+        int rc = signals_handle_netlink(g, nl_fd, ifname, &admin_up);
         if (rc < 0) {
-                perror("signals_handle_netlink");
-                break;
+            perror("signals_handle_netlink");
+            return 1;
         }
+        if (rc == 1)
+            break; /* NLMSG_DONE */
+    }
+
+    while (running) {
+        int rc = signals_handle_netlink(g, nl_fd, ifname, &admin_up);
+        if (rc < 0) {
+            perror("signals_handle_netlink");
+            break;
+        }
+
+        struct explain gex = graph_explain_node(g, ifname);
+        struct lnmgr_explain lex = lnmgr_status_from_graph(&gex, admin_up);
+
+        printf("lnmgrd: %s -> %s", ifname, lnmgr_status_str(lex.status));
+        if (lex.code)
+            printf(" (%s)", lex.code);
+        printf("\n");
     }
 
     printf("lnmgr: shutting down\n");
