@@ -219,6 +219,12 @@ int socket_handle_client(int client_fd, struct graph *g)
         add_subscriber(client_fd);
         reply_snapshot(client_fd, g);
         return 1;   /* keep socket open */
+    
+    } else if (strcmp(line, "HELLO") == 0) {
+           dprintf(client_fd,
+               "{ \"type\": \"hello\", \"version\": 1, "
+                "\"features\": [\"status\",\"dump\",\"save\",\"subscribe\"] }\n");
+            return 0;
 
     } else {
         dprintf(client_fd, "{ \"error\": \"unknown command\" }\n");
