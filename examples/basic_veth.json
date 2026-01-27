@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "id": "lo",
+      "type": "device",
+      "enabled": true
+    },
+    {
+      "id": "veth0",
+      "type": "device",
+      "enabled": true,
+      "signals": ["carrier"]
+    }
+  ]
+}
