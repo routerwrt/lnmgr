@@ -4,12 +4,14 @@
     {
       "id": "lo",
       "type": "device",
-      "enabled": true
+      "enabled": true,
+      "auto": true
     },
     {
       "id": "veth0",
       "type": "device",
       "enabled": true,
+      "auto": true,
       "signals": ["carrier"]
     }
   ]
