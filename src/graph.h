@@ -92,12 +92,12 @@ struct node {
     node_type_t         type;
     bool                enabled;
     bool                auto_up;
+
     node_state_t        state;
     struct signal       *signals;
     struct action_ops   *actions;
-    bool activated;   /* admin-up has been performed */
+    bool                activated;   /* admin-up has been performed */
     fail_reason_t       fail_reason;
-
     struct require      *requires;
 
     /* Traversal bookkeeping:
@@ -155,6 +155,8 @@ int graph_set_signal(struct graph *g,
                      bool value);
 
 int graph_flush(struct graph *g);
+
+int graph_save_json(struct graph *g, int fd);
 
 #ifdef LNMGR_DEBUG
 void graph_debug_dump(struct graph *g);

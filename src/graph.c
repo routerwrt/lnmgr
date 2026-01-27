@@ -45,7 +45,6 @@ static struct node *node_create(const char *id, node_type_t type)
     n->id = strdup(id);
     n->type = type;
     n->enabled = false;
-    n->auto_up = false;
     n->state   = NODE_INACTIVE;
     n->activated = false;
     n->requires = NULL;
@@ -310,22 +309,20 @@ void graph_evaluate(struct graph *g)
 {
     /* Phase 0: auto participation + activation */
     for (struct node *n = g->nodes; n; n = n->next) {
-        if (!n->enabled || !n->auto_up)
+        if (!n->enabled)
+            continue;
+
+        if (!n->auto_up)
             continue;
 
         if (n->state != NODE_INACTIVE)
             continue;
 
-        /* Perform activation exactly once */
-        if (n->actions && n->actions->activate) {
-            if (n->actions->activate(n) != ACTION_OK) {
-                n->state = NODE_FAILED;
-                n->fail_reason = FAIL_ACTION;
-                continue;
-            }
-        }
+        if (n->activated)
+            continue;
 
         n->state = NODE_WAITING;
+        n->activated = true;
     }
  
     /* Phase 1: reset DFS marks */
@@ -432,6 +429,88 @@ struct explain graph_explain_node(struct graph *g, const char *id)
     }
 
     return e;
+}
+
+static int node_cmp_id(const void *a, const void *b)
+{
+    const struct node *na = *(const struct node **)a;
+    const struct node *nb = *(const struct node **)b;
+    return strcmp(na->id, nb->id);
+}
+
+static const char *node_type_str(node_type_t t)
+{
+    switch (t) {
+    case NODE_DEVICE:      return "device";
+    case NODE_BRIDGE:      return "bridge";
+    case NODE_TRANSFORMER: return "transformer";
+    case NODE_SERVICE:     return "service";
+    default:               return "unknown";
+    }
+}
+
+int graph_save_json(struct graph *g, int fd)
+{
+    size_t count = 0;
+    for (struct node *n = g->nodes; n; n = n->next)
+        count++;
+
+    struct node **arr = calloc(count, sizeof(*arr));
+    if (!arr)
+        return -1;
+
+    size_t i = 0;
+    for (struct node *n = g->nodes; n; n = n->next)
+        arr[i++] = n;
+
+    qsort(arr, count, sizeof(*arr), node_cmp_id);
+
+    dprintf(fd, "{ \"version\": 1, \"nodes\": [");
+
+    bool first = true;
+    for (i = 0; i < count; i++) {
+        struct node *n = arr[i];
+
+        if (!first)
+            dprintf(fd, ",");
+        first = false;
+
+        dprintf(fd,
+            "{ \"id\": \"%s\", \"type\": \"%s\", "
+            "\"enabled\": %s, \"auto\": %s",
+            n->id,
+            node_type_str(n->type),
+            n->enabled ? "true" : "false",
+            n->auto_up ? "true" : "false");
+
+        /* signals */
+        dprintf(fd, ", \"signals\": [");
+        bool sfirst = true;
+        for (struct signal *s = n->signals; s; s = s->next) {
+            if (!sfirst)
+                dprintf(fd, ",");
+            sfirst = false;
+            dprintf(fd, "\"%s\"", s->name);
+        }
+        dprintf(fd, "]");
+
+        /* requires */
+        dprintf(fd, ", \"requires\": [");
+        bool rfirst = true;
+        for (struct require *r = n->requires; r; r = r->next) {
+            if (!rfirst)
+                dprintf(fd, ",");
+            rfirst = false;
+            dprintf(fd, "\"%s\"", r->node->id);
+        }
+        dprintf(fd, "]");
+
+        dprintf(fd, " }");
+    }
+
+    dprintf(fd, "] }\n");
+    free(arr);
+    return 0;
 }
 
 #ifdef LNMGR_DEBUG

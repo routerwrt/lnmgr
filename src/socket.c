@@ -9,6 +9,17 @@
 #include "socket.h"
 #include "graph.h"
 
+static const char *node_type_str(node_type_t t)
+{
+    switch (t) {
+    case NODE_DEVICE:      return "device";
+    case NODE_BRIDGE:      return "bridge";
+    case NODE_TRANSFORMER: return "transformer";
+    case NODE_SERVICE:     return "service";
+    default:               return "unknown";
+    }
+}
+
 int socket_listen(const char *path)
 {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -101,15 +112,21 @@ static void reply_dump(int fd, struct graph *g)
         first = false;
 
         dprintf(fd,
-            "{ \"id\": \"%s\", \"type\": %d, \"enabled\": %s }",
-            n->id,
-            n->type,
-            n->enabled ? "true" : "false");
+            "{ \"id\": \"%s\", \"type\": \"%s\", \"enabled\": %s, \"auto\": %s }",
+                n->id,
+                node_type_str(n->type),
+                n->enabled ? "true" : "false",
+                n->auto_up ? "true" : "false");
 
         n = n->next;
     }
 
     dprintf(fd, "] }\n");
+}
+
+static void reply_save(int fd, struct graph *g)
+{
+    graph_save_json(g, fd);
 }
 
 int socket_handle_client(int client_fd, struct graph *g)
@@ -121,17 +138,22 @@ int socket_handle_client(int client_fd, struct graph *g)
 
     if (strcmp(line, "STATUS") == 0) {
         reply_status_all(client_fd, g);
+
     } else if (strncmp(line, "STATUS ", 7) == 0) {
         reply_status_one(client_fd, g, line + 7);
+
     } else if (strcmp(line, "DUMP") == 0) {
         reply_dump(client_fd, g);
+
+    } else if (strcmp(line, "SAVE") == 0) {
+        reply_save(client_fd, g);
+
     } else {
         dprintf(client_fd, "{ \"error\": \"unknown command\" }\n");
     }
 
     return 0;
 }
-
 void socket_close(int fd, const char *path)
 {
     if (fd >= 0)
