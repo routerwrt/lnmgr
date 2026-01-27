@@ -125,6 +125,7 @@ struct node_tmp {
     int signals_n;
     char **requires;
     int requires_n;
+    struct node *gn;
 };
 
 static void node_tmp_free(struct node_tmp *n)
@@ -433,10 +434,14 @@ int config_load_file(struct graph *g, const char *path)
 
     /* Apply in 3 phases so requires can refer to nodes defined later in file */
     for (int i = 0; i < nodes_n; i++) {
-        if (!graph_add_node(g, nodes[i].id, nodes[i].type))
-                goto fail;
-    }
+        struct node *gn = graph_add_node(g, nodes[i].id, nodes[i].type);
+        if (!gn)
+            goto fail;
 
+        /* stash pointer for later phases */
+        nodes[i].gn = gn;
+    }
+ 
     for (int i = 0; i < nodes_n; i++) {
         for (int s = 0; s < nodes[i].signals_n; s++) {
             if (graph_add_signal(g, nodes[i].id, nodes[i].signals[s]) < 0)
@@ -452,14 +457,16 @@ int config_load_file(struct graph *g, const char *path)
     }
 
     for (int i = 0; i < nodes_n; i++) {
+        struct node *n = nodes[i].gn;
+
+        n->auto_up = nodes[i].auto_up;
+
         if (nodes[i].enabled) {
-            if (graph_enable_node(g, nodes[i].id) < 0)
+            if (graph_enable_node(g, n->id) < 0)
                 goto fail;
         }
-        /* auto semantics can come later; for now it’s just stored (or ignored) */
-        (void)nodes[i].auto_up;
     }
-
+ 
     graph_evaluate(g);
 
     for (int i = 0; i < nodes_n; i++)
