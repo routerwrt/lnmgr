@@ -10,6 +10,26 @@
 #include "graph.h"
 #include "lnmgr_status.h"
 
+#define MAX_SUBSCRIBERS 16
+
+static int subscribers[MAX_SUBSCRIBERS];
+static int subscriber_count = 0;
+
+void add_subscriber(int fd)
+{
+    if (subscriber_count >= MAX_SUBSCRIBERS) {
+        close(fd);
+        return;
+    }
+    subscribers[subscriber_count++] = fd;
+}
+
+static void drop_subscriber(int i)
+{
+    close(subscribers[i]);
+    subscribers[i] = subscribers[--subscriber_count];
+}
+
 int socket_listen(const char *path)
 {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);

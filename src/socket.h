@@ -12,4 +12,6 @@ int socket_handle_client(int fd, struct graph *g);
 /* cleanup */
 void socket_close(int fd, const char *path);
 
+void socket_add_subscriber(int fd);
+
 #endif
