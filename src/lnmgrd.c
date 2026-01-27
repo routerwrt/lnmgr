@@ -1,3 +1,34 @@
+/*
+ * lnmgrd — Link Manager Daemon
+ *
+ * lnmgrd is a minimal, event-driven network link manager for Linux.
+ *
+ * Responsibilities:
+ *  - Owns the in-memory dependency graph of network objects (devices, links,
+ *    bridges, tunnels, services).
+ *  - Reacts to kernel events (netlink) and external signals.
+ *  - Evaluates link readiness based on explicit dependencies and signals.
+ *  - Executes activation/deactivation actions when graph state changes.
+ *  - Exposes read-only introspection via a local UNIX control socket.
+ *
+ * Design principles:
+ *  - Single-threaded, deterministic event loop.
+ *  - Kernel-facing logic (netlink) separated from policy and presentation.
+ *  - No implicit policy: only explicit configuration and signals.
+ *  - No background retries, timers, or heuristics.
+ *  - No dependency on systemd, dbus, or external frameworks.
+ *
+ * Non-goals:
+ *  - No dynamic policy engine.
+ *  - No automatic network configuration or probing.
+ *  - No UI logic or user interaction.
+ *  - No long-lived client connections.
+ *
+ * The daemon is intentionally small and conservative. Higher-level behavior
+ * (CLI, policy, orchestration, UI) is implemented outside of lnmgrd via the
+ * control socket.
+ */
+
 /* libc */
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +51,9 @@
 #include "graph.h"
 #include "lnmgr_status.h"
 #include "config.h"
+#include "socket.h"
+
+#define LNMGR_SOCKET_PATH "/run/lnmgr.sock"
 
 /*
  * Minimal lnmgr v0
@@ -118,6 +152,12 @@ int main(int argc, char **argv)
 
     printf("lnmgrd: configuration loaded, running (Ctrl+C to exit)\n");
 
+    int sock_fd = socket_listen(LNMGR_SOCKET_PATH);
+    if (sock_fd < 0) {
+        perror("socket_listen");
+        return 1;
+    }
+
     int nl_fd = open_rtnetlink();
     if (nl_fd < 0) {
         perror("netlink");
@@ -147,32 +187,47 @@ int main(int argc, char **argv)
 
     printf("lnmgrd: initial link state synchronized\n");
 
-    struct pollfd pfd;
+    struct pollfd pfds[2];
 
-    pfd.fd = nl_fd;
-    pfd.events = POLLIN;
+    pfds[0].fd = nl_fd;
+    pfds[0].events = POLLIN;
+
+    pfds[1].fd = sock_fd;
+    pfds[1].events = POLLIN;
 
     /* Event loop */
     while (running) {
-        int rc = poll(&pfd, 1, -1);
+        int rc = poll(pfds, 2, -1);
 
         if (rc < 0) {
             if (errno == EINTR)
-                continue;   /* interrupted by signal, check running */
+                continue;   /* signal: check running */
             perror("poll");
             break;
         }
 
-        if (pfd.revents & POLLIN) {
+        /* --- netlink events --- */
+        if (pfds[0].revents & POLLIN) {
             int r = signals_handle_netlink(g, nl_fd);
             if (r < 0) {
                 perror("signals_handle_netlink");
                 break;
             }
         }
+
+        /* --- control socket events --- */
+        if (pfds[1].revents & POLLIN) {
+            int cfd = accept(sock_fd, NULL, NULL);
+            if (cfd >= 0) {
+                socket_handle_client(cfd, g);
+                close(cfd);
+            }
+        }
     }
 
     printf("lnmgrd: shutting down\n");
+
+    socket_close(sock_fd, LNMGR_SOCKET_PATH);
 
     if (nl_fd >= 0)
         close(nl_fd);
