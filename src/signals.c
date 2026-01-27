@@ -14,9 +14,15 @@
  *
  * Currently:
  *  - DEVICE carrier only
+ *
+ * returns:
+ *  0 = processed message(s)
+ *  1 = dump complete
+ * -1 = error
  */
-
-int signals_handle_netlink(struct graph *g, int nl_fd)
+int signals_handle_netlink(struct graph *g, int nl_fd,
+                           const char *watch_if,
+                           bool *admin_up_out)
 {
     char buf[4096];
     struct iovec iov = {
@@ -34,13 +40,16 @@ int signals_handle_netlink(struct graph *g, int nl_fd)
     ssize_t len = recvmsg(nl_fd, &msg, 0);
     if (len < 0) {
         if (errno == EINTR)
-                return 0;      /* interrupted, loop will exit */
-        return -1;         /* EBADF or real error */
+            return 0;
+        return -1;
     }
 
     for (struct nlmsghdr *nh = (struct nlmsghdr *)buf;
          NLMSG_OK(nh, len);
          nh = NLMSG_NEXT(nh, len)) {
+
+        if (nh->nlmsg_type == NLMSG_DONE)
+        return 1;   /* dump finished */
 
         if (nh->nlmsg_type != RTM_NEWLINK)
             continue;
@@ -63,9 +72,15 @@ int signals_handle_netlink(struct graph *g, int nl_fd)
         if (!ifname)
             continue;
 
-        bool carrier = (ifi->ifi_flags & IFF_RUNNING);
+        /* --- admin-up (kernel fact, not a graph signal) --- */
+        if (watch_if && admin_up_out && strcmp(ifname, watch_if) == 0) {
+            *admin_up_out = !!(ifi->ifi_flags & IFF_UP);
+        }
 
+        /* --- carrier (graph signal) --- */
+        bool carrier = (ifi->ifi_flags & IFF_LOWER_UP);
         graph_set_signal(g, ifname, "carrier", carrier);
+
         graph_evaluate(g);
     }
 
