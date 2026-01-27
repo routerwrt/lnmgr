@@ -6,7 +6,8 @@ SRC = \
     src/graph.c \
     src/actions.c \
     src/signals.c \
-    src/lnmgr_status.c
+    src/lnmgr_status.c \
+    src/config.c
 
 SRC += src/json/jsmn_impl.c
 
