@@ -8,6 +8,8 @@ SRC = \
     src/signals.c \
     src/lnmgr_status.c
 
+SRC += src/json/jsmn_impl.c
+
 OBJ = $(SRC:.c=.o)
 
 lnmgrd: $(OBJ)
