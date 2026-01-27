@@ -218,8 +218,10 @@ int main(int argc, char **argv)
         if (pfds[1].revents & POLLIN) {
             int cfd = accept(sock_fd, NULL, NULL);
             if (cfd >= 0) {
-                socket_handle_client(cfd, g);
-                close(cfd);
+                int r = socket_handle_client(cfd, g);
+                if (r == 0)
+                    close(cfd);
+                /* r == 1 → subscriber, keep fd open */
             }
         }
     }

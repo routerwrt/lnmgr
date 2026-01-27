@@ -15,7 +15,7 @@
 static int subscribers[MAX_SUBSCRIBERS];
 static int subscriber_count = 0;
 
-void add_subscriber(int fd)
+static void add_subscriber(int fd)
 {
     if (subscriber_count >= MAX_SUBSCRIBERS) {
         close(fd);
@@ -28,6 +28,11 @@ static void drop_subscriber(int i)
 {
     close(subscribers[i]);
     subscribers[i] = subscribers[--subscriber_count];
+}
+
+void socket_add_subscriber(int fd)
+{
+    add_subscriber(fd);
 }
 
 int socket_listen(const char *path)
@@ -160,6 +165,10 @@ int socket_handle_client(int client_fd, struct graph *g)
 
     } else if (strcmp(line, "SAVE") == 0) {
         reply_save(client_fd, g);
+
+    } else if (strcmp(line, "SUBSCRIBE") == 0) {
+         add_subscriber(client_fd);
+        return 1;   /* special: caller must NOT close fd */
 
     } else {
         dprintf(client_fd, "{ \"error\": \"unknown command\" }\n");
