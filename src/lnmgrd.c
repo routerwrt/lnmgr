@@ -6,6 +6,8 @@
 #include <errno.h>
 #include <string.h>
 #include <stdbool.h>
+#include <poll.h>
+
 
 /* sockets */
 #include <sys/socket.h>
@@ -31,8 +33,13 @@
 
 int signals_handle_netlink(struct graph *g, int nl_fd);
 
-static int nl_fd = -1;
 static volatile sig_atomic_t running = 1;
+
+static void on_sigint(int sig)
+{
+    (void)sig;
+    running = 0;
+}
 
 static int netlink_request_getlink(int nl_fd)
 {
@@ -51,17 +58,6 @@ static int netlink_request_getlink(int nl_fd)
     req.ifm.ifi_family = AF_UNSPEC;
 
     return send(nl_fd, &req, req.nh.nlmsg_len, 0);
-}
-
-static void on_sigint(int sig)
-{
-    (void)sig;
-    running = 0;
-
-    if (nl_fd >= 0) {
-        close(nl_fd);
-        nl_fd = -1;
-    }
 }
 
 static void setup_signals(void)
@@ -151,18 +147,37 @@ int main(int argc, char **argv)
 
     printf("lnmgrd: initial link state synchronized\n");
 
+    struct pollfd pfd;
+
+    pfd.fd = nl_fd;
+    pfd.events = POLLIN;
+
     /* Event loop */
     while (running) {
-        int rc = signals_handle_netlink(g, nl_fd);
+        int rc = poll(&pfd, 1, -1);
+
         if (rc < 0) {
-            perror("signals_handle_netlink");
+            if (errno == EINTR)
+                continue;   /* interrupted by signal, check running */
+            perror("poll");
             break;
+        }
+
+        if (pfd.revents & POLLIN) {
+            int r = signals_handle_netlink(g, nl_fd);
+            if (r < 0) {
+                perror("signals_handle_netlink");
+                break;
+            }
         }
     }
 
     printf("lnmgrd: shutting down\n");
 
-    close(nl_fd);
+    if (nl_fd >= 0)
+        close(nl_fd);
+
     graph_destroy(g);
+
     return 0;
 }
