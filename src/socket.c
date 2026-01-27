@@ -9,17 +9,6 @@
 #include "socket.h"
 #include "graph.h"
 
-static const char *node_type_str(node_type_t t)
-{
-    switch (t) {
-    case NODE_DEVICE:      return "device";
-    case NODE_BRIDGE:      return "bridge";
-    case NODE_TRANSFORMER: return "transformer";
-    case NODE_SERVICE:     return "service";
-    default:               return "unknown";
-    }
-}
-
 int socket_listen(const char *path)
 {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -114,7 +103,7 @@ static void reply_dump(int fd, struct graph *g)
         dprintf(fd,
             "{ \"id\": \"%s\", \"type\": \"%s\", \"enabled\": %s, \"auto\": %s }",
                 n->id,
-                node_type_str(n->type),
+                node_type_to_str(n->type),
                 n->enabled ? "true" : "false",
                 n->auto_up ? "true" : "false");
 

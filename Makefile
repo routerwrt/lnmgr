@@ -14,7 +14,8 @@ SRC = \
     src/lnmgr_status.c \
     src/config.c \
     src/socket.c \
-    src/json/jsmn_impl.c
+    src/json/jsmn_impl.c \
+    src/graph_strings.c
 
 OBJ = $(SRC:.c=.o)
 

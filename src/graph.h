@@ -56,6 +56,11 @@ typedef enum {
     ACTION_FAIL
 } action_result_t;
 
+/* String helpers (stable ABI) */
+const char *node_type_to_str(node_type_t t);
+const char *node_state_to_str(node_state_t s);
+const char *explain_type_to_str(explain_type_t e);
+
 struct explain {
     explain_type_t type;
     const char *detail; /* blocking node id OR signal name */
