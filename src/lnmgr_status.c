@@ -58,20 +58,11 @@ struct lnmgr_explain current_status(struct graph *g,
 bool lnmgr_explain_equal(const struct lnmgr_explain *a,
                          const struct lnmgr_explain *b)
 {
-    if (a == b)
-        return true;
-
     if (!a || !b)
         return false;
 
     if (a->status != b->status)
         return false;
 
-    if (a->code == b->code)
-        return true;
-
-    if (!a->code || !b->code)
-        return false;
-
-    return strcmp(a->code, b->code) == 0;
+    return a->code == b->code;
 }
