@@ -21,4 +21,6 @@ or user intent.
 - Manage routing or firewall rules
 - Implement network policy
 
-See DESIGN.md for details.
+## Documentation
+
+See [`docs/`](docs/) for design and protocol documentation.
