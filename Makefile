@@ -9,7 +9,8 @@ SRC = \
     src/actions.c \
     src/signals.c \
     src/lnmgr_status.c \
-    src/config.c
+    src/config.c \
+    src/socket.c
 
 SRC += src/json/jsmn_impl.c
 
