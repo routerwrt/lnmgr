@@ -98,6 +98,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    write(fd, "HELLO\n", 6);
+    read_reply(fd);   /* ignore for now, but read it */
+
     if (send_command(fd, cmd) < 0) {
         perror("lnmgr: write");
         close(fd);
