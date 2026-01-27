@@ -154,4 +154,9 @@ int graph_set_signal(struct graph *g,
                      bool value);
 
 int graph_flush(struct graph *g);
+
+#ifdef LNMGR_DEBUG
+void graph_debug_dump(struct graph *g);
+#endif
+
 #endif /* LNMGR_GRAPH_H */

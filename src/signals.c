@@ -74,6 +74,9 @@ int signals_handle_netlink(struct graph *g, int nl_fd)
 
         if (graph_set_signal(g, ifname, "carrier", carrier)) {
             graph_evaluate(g);
+        #ifdef LNMGR_DEBUG
+           graph_debug_dump(g);
+        #endif
         }
     }
 

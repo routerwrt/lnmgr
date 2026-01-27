@@ -412,3 +412,22 @@ struct explain graph_explain_node(struct graph *g, const char *id)
 
     return e;
 }
+
+#ifdef LNMGR_DEBUG
+void graph_debug_dump(struct graph *g)
+{
+    for (struct node *n = g->nodes; n; n = n->next) {
+        struct explain e = graph_explain_node(g, n->id);
+
+        printf("graph: %s state=%d explain=%d",
+               n->id,
+               n->state,
+               e.type);
+
+        if (e.detail)
+            printf(" detail=%s", e.detail);
+
+        printf("\n");
+    }
+}
+#endif

@@ -1,6 +1,8 @@
 CC ?= cc
 CFLAGS ?= -Wall -Wextra -O2
 
+CFLAGS += -DLNMGR_DEBUG
+
 SRC = \
     src/lnmgrd.c \
     src/graph.c \
