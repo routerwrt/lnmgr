@@ -47,3 +47,31 @@ struct lnmgr_explain lnmgr_status_from_graph(const struct explain *gex,
     out.status = LNMGR_STATUS_UP;
     return out;
 }
+
+struct lnmgr_explain current_status(struct graph *g,
+                            struct node *n, bool admin_up)
+{
+    struct explain gex = graph_explain_node(g, n->id);
+    return lnmgr_status_from_graph(&gex, admin_up);
+}
+
+bool lnmgr_explain_equal(const struct lnmgr_explain *a,
+                         const struct lnmgr_explain *b)
+{
+    if (a == b)
+        return true;
+
+    if (!a || !b)
+        return false;
+
+    if (a->status != b->status)
+        return false;
+
+    if (a->code == b->code)
+        return true;
+
+    if (!a->code || !b->code)
+        return false;
+
+    return strcmp(a->code, b->code) == 0;
+}

@@ -35,6 +35,27 @@ void socket_add_subscriber(int fd)
     add_subscriber(fd);
 }
 
+static void notify_subscribers(struct graph *g, bool admin_up)
+{
+    for (struct subscriber *s = subscribers; s; s = s->next) {
+
+        for (struct node *n = g->nodes; n; n = n->next) {
+
+            struct lnmgr_explain now =
+                lnmgr_status_for_node(g, n, admin_up);
+
+            struct lnmgr_explain *prev =
+                subscriber_last(s, n);
+
+            if (lnmgr_explain_equal(prev, &now))
+                continue;
+
+            socket_send_event(s->fd, n->id, &now);
+            *prev = now;
+        }
+    }
+}
+
 int socket_listen(const char *path)
 {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);

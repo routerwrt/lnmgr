@@ -3,6 +3,12 @@
 
 struct graph;
 
+struct subscriber {
+    int fd;
+    struct lnmgr_explain *last; /* array indexed by node */
+    struct subscriber *next;
+};
+
 /* create, bind, listen */
 int socket_listen(const char *path);
 
