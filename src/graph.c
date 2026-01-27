@@ -45,6 +45,7 @@ static struct node *node_create(const char *id, node_type_t type)
     n->id = strdup(id);
     n->type = type;
     n->enabled = false;
+    n->activated = true;
     n->state = NODE_INACTIVE;
     n->requires = NULL;
     n->next = NULL;
@@ -255,6 +256,8 @@ int graph_disable_node(struct graph *g, const char *id)
 
     n->enabled = false;
     n->state = NODE_INACTIVE;
+    n->activated = false;
+
     return 0;
 }
 
@@ -316,9 +319,16 @@ void graph_evaluate(struct graph *g)
             if (!n->enabled)
                 continue;
 
-            /* Phase 1: activation (do NOT require signals) */
-            if (n->state == NODE_WAITING && requirements_met(n)) {
+            /* Phase 0: demotion on signal loss (NO deactivation) */
+            if (n->state == NODE_ACTIVE && !signals_met(n)) {
+                n->state = NODE_WAITING;
+                progress = true;
+            }
 
+            /* Phase 1: activation (do NOT require signals) */
+            if (n->state == NODE_WAITING &&
+                            requirements_met(n) &&
+                            !n->activated) {
                 if (n->actions && n->actions->activate) {
                     action_result_t r = n->actions->activate(n);
                     if (r != ACTION_OK) {
@@ -328,7 +338,7 @@ void graph_evaluate(struct graph *g)
                     }
                 }
 
-                /* activation attempted (or not needed), but not ACTIVE yet */
+                n->activated = true;
             }
 
             /* Phase 2: readiness (signals decide ACTIVE state) */

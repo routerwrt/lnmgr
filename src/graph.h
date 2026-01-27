@@ -94,7 +94,7 @@ struct node {
     node_state_t        state;
     struct signal       *signals;
     struct action_ops   *actions;
-
+    bool activated;   /* admin-up has been performed */
     fail_reason_t       fail_reason;
 
     struct require      *requires;
