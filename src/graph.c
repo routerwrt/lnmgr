@@ -285,11 +285,6 @@ static bool signals_met(struct node *n)
     return true;
 }
 
-static bool node_ready(struct node *n)
-{
-    return requirements_met(n) && signals_met(n);
-}
-
 void graph_evaluate(struct graph *g)
 {
     /* reset DFS marks */
@@ -312,7 +307,7 @@ void graph_evaluate(struct graph *g)
         }
     }
 
-    /* existing evaluation logic */
+    /*  evaluation logic */
     bool progress;
     do {
         progress = false;
@@ -321,24 +316,28 @@ void graph_evaluate(struct graph *g)
             if (!n->enabled)
                 continue;
 
-            if (n->state == NODE_WAITING && node_ready(n)) {
+            /* Phase 1: activation (do NOT require signals) */
+            if (n->state == NODE_WAITING && requirements_met(n)) {
 
-                if (!n->actions || !n->actions->activate) {
-                    /* no action needed: logical node */
-                    n->state = NODE_ACTIVE;
-                    progress = true;
-                    continue;
+                if (n->actions && n->actions->activate) {
+                    action_result_t r = n->actions->activate(n);
+                    if (r != ACTION_OK) {
+                        n->state = NODE_FAILED;
+                        n->fail_reason = FAIL_ACTION;
+                        continue;
+                    }
                 }
 
-                action_result_t r = n->actions->activate(n);
+                /* activation attempted (or not needed), but not ACTIVE yet */
+            }
 
-                if (r == ACTION_OK) {
-                    n->state = NODE_ACTIVE;
-                    progress = true;
-                } else {
-                    n->state = NODE_FAILED;
-                    n->fail_reason = FAIL_ACTION;
-                }
+            /* Phase 2: readiness (signals decide ACTIVE state) */
+            if (n->state == NODE_WAITING &&
+                requirements_met(n) &&
+                signals_met(n)) {
+
+                n->state = NODE_ACTIVE;
+                progress = true;
             }
         }
 
