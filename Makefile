@@ -15,7 +15,7 @@ SRC = \
     src/config.c \
     src/socket.c \
     src/json/jsmn_impl.c \
-    src/graph_strings.c \
+    src/enum_str.c \
     src/protocol.c
 
 OBJ = $(SRC:.c=.o)
