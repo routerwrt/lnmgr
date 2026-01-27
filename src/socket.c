@@ -8,6 +8,7 @@
 
 #include "socket.h"
 #include "graph.h"
+#include "lnmgr_status.h"
 
 int socket_listen(const char *path)
 {
@@ -70,17 +71,20 @@ static void reply_status_all(int fd, struct graph *g)
     bool first = true;
 
     while (n) {
-        struct explain e = graph_explain_node(g, n->id);
-
         if (!first)
             dprintf(fd, ",");
         first = false;
 
-        dprintf(fd,
-            "{ \"id\": \"%s\", \"state\": %d, \"explain\": %d }",
+        struct explain gex = graph_explain_node(g, n->id);
+        struct lnmgr_explain lex = lnmgr_status_from_graph(&gex, true);
+
+        const char *code = lnmgr_code_to_str(lex.code);
+
+        dprintf(fd, "{ \"id\": \"%s\", \"state\": \"%s\"%s%s }",
             n->id,
-            n->state,
-            e.type);
+            lnmgr_status_to_str(lex.status),
+            code ? ", \"code\": \"" : "",
+            code ? code : "");
 
         n = n->next;
     }

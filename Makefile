@@ -29,6 +29,9 @@ CLI_OBJ = $(CLI_SRC:.c=.o)
 lnmgr: $(CLI_OBJ)
 	$(CC) $(CLI_CFLAGS) -o $@ $(CLI_OBJ)
 
+test-protocol:
+	@tests/protocol_golden.sh
+
 clean:
 	rm -f $(OBJ) $(CLI_OBJ) lnmgr lnmgrd
 
