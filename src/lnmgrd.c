@@ -97,6 +97,30 @@ static int open_rtnetlink(void)
     return fd;
 }
 
+static struct lnmgr_explain last = {
+    .status = LNMGR_STATUS_UNKNOWN,
+    .code = NULL,
+};
+
+static void maybe_print_status(const char *ifname,
+                               struct lnmgr_explain *now)
+{
+    if (now->status == last.status &&
+        ((now->code == NULL && last.code == NULL) ||
+         (now->code && last.code &&
+          strcmp(now->code, last.code) == 0))) {
+        return;
+    }
+
+    printf("lnmgrd: %s -> %s", ifname,
+           lnmgr_status_str(now->status));
+    if (now->code)
+        printf(" (%s)", now->code);
+    printf("\n");
+
+    last = *now;
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 2) {
@@ -120,7 +144,9 @@ int main(int argc, char **argv)
     }
     /* for testing only - until config parser done*/
     /* testing-only heuristic */
-    bool require_carrier = strncmp(ifname, "eth", 3) == 0;
+    bool require_carrier =
+                strncmp(ifname, "eth", 3) == 0 ||
+                strncmp(ifname, "veth", 4) == 0;
 
     /* intent */
     graph_add_node(g, ifname, NODE_DEVICE);
@@ -136,7 +162,7 @@ int main(int argc, char **argv)
     graph_evaluate(g);
 
     printf("lnmgr: graph evaluated, running (Ctrl+C to exit)\n");
-    
+
     nl_fd = open_rtnetlink();
     if (nl_fd < 0) {
         perror("netlink");
@@ -147,9 +173,11 @@ int main(int argc, char **argv)
         perror("RTM_GETLINK");
         return 1;
     }
+
     /* Initial link state sync */
     bool admin_up = false;
 
+    /* Drain RTM_GETLINK dump */
     for (;;) {
         int rc = signals_handle_netlink(g, nl_fd, ifname, &admin_up);
         if (rc < 0) {
@@ -160,6 +188,15 @@ int main(int argc, char **argv)
             break; /* NLMSG_DONE */
     }
 
+    /* === NEW: final convergence after dump === */
+    graph_evaluate(g);
+
+    struct explain gex = graph_explain_node(g, ifname);
+    struct lnmgr_explain lex = lnmgr_status_from_graph(&gex, admin_up);
+
+    maybe_print_status(ifname, &lex);
+
+    /* === Event loop === */
     while (running) {
         int rc = signals_handle_netlink(g, nl_fd, ifname, &admin_up);
         if (rc < 0) {
@@ -170,10 +207,7 @@ int main(int argc, char **argv)
         struct explain gex = graph_explain_node(g, ifname);
         struct lnmgr_explain lex = lnmgr_status_from_graph(&gex, admin_up);
 
-        printf("lnmgrd: %s -> %s", ifname, lnmgr_status_str(lex.status));
-        if (lex.code)
-            printf(" (%s)", lex.code);
-        printf("\n");
+        maybe_print_status(ifname, &lex);
     }
 
     printf("lnmgr: shutting down\n");
