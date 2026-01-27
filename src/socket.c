@@ -147,6 +147,34 @@ static void reply_save(int fd, struct graph *g)
     graph_save_json(g, fd);
 }
 
+static void reply_snapshot(int fd, struct graph *g)
+{
+    dprintf(fd, "{ \"type\": \"snapshot\", \"nodes\": [");
+
+    bool first = true;
+    for (struct node *n = g->nodes; n; n = n->next) {
+        struct explain gex = graph_explain_node(g, n->id);
+        struct lnmgr_explain lex =
+            lnmgr_status_from_graph(&gex, /* admin_up */ true);
+
+        if (!first)
+            dprintf(fd, ",");
+        first = false;
+
+        dprintf(fd,
+            "{ \"id\": \"%s\", \"state\": \"%s\"",
+            n->id,
+            lnmgr_status_to_str(lex.status));
+
+        if (lex.code)
+            dprintf(fd, ", \"code\": \"%s\"", lex.code);
+
+        dprintf(fd, " }");
+    }
+
+    dprintf(fd, "] }\n");
+}
+
 int socket_handle_client(int client_fd, struct graph *g)
 {
     char line[256];
@@ -167,8 +195,9 @@ int socket_handle_client(int client_fd, struct graph *g)
         reply_save(client_fd, g);
 
     } else if (strcmp(line, "SUBSCRIBE") == 0) {
-         add_subscriber(client_fd);
-        return 1;   /* special: caller must NOT close fd */
+        add_subscriber(client_fd);
+        reply_snapshot(client_fd, g);
+        return 1;   /* keep socket open */
 
     } else {
         dprintf(client_fd, "{ \"error\": \"unknown command\" }\n");
