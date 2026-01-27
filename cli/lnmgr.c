@@ -47,6 +47,19 @@ static void read_and_print_reply(int fd)
     }
 }
 
+static void read_reply(int fd)
+{
+    char buf[4096];
+    ssize_t n;
+
+    while ((n = read(fd, buf, sizeof(buf))) > 0) {
+        fwrite(buf, 1, n, stdout);
+        if (buf[n - 1] == '\n')
+            break;
+    }
+}
+
+
 static void usage(const char *argv0)
 {
     fprintf(stderr,
@@ -98,8 +111,12 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    write(fd, "HELLO\n", 6);
-    read_reply(fd);   /* ignore for now, but read it */
+     if (write(fd, "HELLO\n", 6) < 0) {
+        perror("write");
+        return 1;
+    }
+
+    read_reply(fd);
 
     if (send_command(fd, cmd) < 0) {
         perror("lnmgr: write");
