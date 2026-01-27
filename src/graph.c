@@ -45,8 +45,9 @@ static struct node *node_create(const char *id, node_type_t type)
     n->id = strdup(id);
     n->type = type;
     n->enabled = false;
-    n->activated = true;
-    n->state = NODE_INACTIVE;
+    n->auto_up = false;
+    n->state   = NODE_INACTIVE;
+    n->activated = false;
     n->requires = NULL;
     n->next = NULL;
     n->fail_reason = FAIL_NONE;
@@ -307,7 +308,27 @@ static bool signals_met(struct node *n)
 
 void graph_evaluate(struct graph *g)
 {
-    /* reset DFS marks */
+    /* Phase 0: auto participation + activation */
+    for (struct node *n = g->nodes; n; n = n->next) {
+        if (!n->enabled || !n->auto_up)
+            continue;
+
+        if (n->state != NODE_INACTIVE)
+            continue;
+
+        /* Perform activation exactly once */
+        if (n->actions && n->actions->activate) {
+            if (n->actions->activate(n) != ACTION_OK) {
+                n->state = NODE_FAILED;
+                n->fail_reason = FAIL_ACTION;
+                continue;
+            }
+        }
+
+        n->state = NODE_WAITING;
+    }
+ 
+    /* Phase 1: reset DFS marks */
     for (struct node *n = g->nodes; n; n = n->next)
         n->dfs = DFS_WHITE;
 
@@ -335,7 +356,7 @@ void graph_evaluate(struct graph *g)
         for (struct node *n = g->nodes; n; n = n->next) {
             if (!n->enabled)
                 continue;
-
+ 
             /* Phase 0: demotion on signal loss (NO deactivation) */
             if (n->state == NODE_ACTIVE && !signals_met(n)) {
                 n->state = NODE_WAITING;

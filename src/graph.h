@@ -91,6 +91,7 @@ struct node {
     char                *id;
     node_type_t         type;
     bool                enabled;
+    bool                auto_up;
     node_state_t        state;
     struct signal       *signals;
     struct action_ops   *actions;
