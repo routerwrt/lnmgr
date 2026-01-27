@@ -8,7 +8,7 @@
  * Node lifecycle states
  */
 typedef enum {
-    NODE_INACTIVE = 0,  /* disabled by user */
+    NODE_INACTIVE = 0,  /* disabled by policy / manager */
     NODE_WAITING,       /* enabled, waiting for requirements/signals */
     NODE_ACTIVE,        /* operational */
     NODE_FAILED         /* attempted activation failed */
@@ -30,12 +30,19 @@ typedef enum {
     DFS_BLACK
 } dfs_mark_t;
 
+/* Internal failure classification (not user-visible) */
 typedef enum {
     FAIL_NONE = 0,
     FAIL_CYCLE,
     FAIL_ACTION
 } fail_reason_t;
 
+/*
+ * graph explain_type_t:
+ * Structural reasons only.
+ * No protocol, policy, or user semantics.
+ * Interpretation is the responsibility of the manager layer.
+ */
 typedef enum {
     EXPLAIN_NONE = 0,
     EXPLAIN_DISABLED,
@@ -92,9 +99,10 @@ struct node {
 
     struct require      *requires;
 
-    /* bookkeeping */
-    bool                visited;
-    dfs_mark_t          dfs;
+    /* Traversal bookkeeping:
+     * - dfs: used only for cycle detection
+     */
+    dfs_mark_t          dfs;            /* cycle detection */
     struct node         *next;
 };
 
