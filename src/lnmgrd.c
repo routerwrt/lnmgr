@@ -49,7 +49,6 @@
 
 /* project */
 #include "graph.h"
-#include "lnmgr_status.h"
 #include "config.h"
 #include "socket.h"
 

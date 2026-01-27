@@ -11,55 +11,39 @@
  * - NONE => UP
  */
 struct lnmgr_explain lnmgr_status_from_graph(const struct explain *gex,
-                        bool admin_up)
+                                            bool admin_up)
 {
     struct lnmgr_explain out = {
         .status = LNMGR_STATUS_UNKNOWN,
-        .code   = NULL,
+        .code   = LNMGR_CODE_NONE,
     };
 
-    if (!gex) {
+    if (!gex)
         return out;
-    }
 
     if (gex->type == EXPLAIN_DISABLED) {
         out.status = LNMGR_STATUS_DISABLED;
-        out.code   = "disabled";
         return out;
     }
 
     if (!admin_up) {
         out.status = LNMGR_STATUS_ADMIN_DOWN;
-        out.code   = "admin";
+        out.code   = LNMGR_CODE_ADMIN;
         return out;
     }
 
     if (gex->type == EXPLAIN_FAILED) {
         out.status = LNMGR_STATUS_FAILED;
-        out.code   = gex->detail ? gex->detail : "failed";
+        out.code   = LNMGR_CODE_FAILED;
         return out;
     }
 
     if (gex->type != EXPLAIN_NONE) {
         out.status = LNMGR_STATUS_WAITING;
-        out.code   = gex->detail;
+        out.code   = LNMGR_CODE_SIGNAL;
         return out;
     }
 
     out.status = LNMGR_STATUS_UP;
     return out;
-}
-
-const char * lnmgr_status_str(lnmgr_status_t st)
-{
-    switch (st) {
-    case LNMGR_STATUS_DISABLED:   return "disabled";
-    case LNMGR_STATUS_ADMIN_DOWN: return "admin-down";
-    case LNMGR_STATUS_WAITING:    return "waiting";
-    case LNMGR_STATUS_UP:         return "up";
-    case LNMGR_STATUS_FAILED:     return "failed";
-    case LNMGR_STATUS_UNKNOWN:
-    default:
-        return "unknown";
-    }
 }
