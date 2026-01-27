@@ -20,9 +20,7 @@
  *  1 = dump complete
  * -1 = error
  */
-int signals_handle_netlink(struct graph *g, int nl_fd,
-                           const char *watch_if,
-                           bool *admin_up_out)
+int signals_handle_netlink(struct graph *g, int nl_fd)
 {
     char buf[4096];
     struct iovec iov = {
@@ -49,7 +47,7 @@ int signals_handle_netlink(struct graph *g, int nl_fd,
          nh = NLMSG_NEXT(nh, len)) {
 
         if (nh->nlmsg_type == NLMSG_DONE)
-        return 1;   /* dump finished */
+            return 1;
 
         if (nh->nlmsg_type != RTM_NEWLINK)
             continue;
@@ -72,16 +70,11 @@ int signals_handle_netlink(struct graph *g, int nl_fd,
         if (!ifname)
             continue;
 
-        /* --- admin-up (kernel fact, not a graph signal) --- */
-        if (watch_if && admin_up_out && strcmp(ifname, watch_if) == 0) {
-            *admin_up_out = !!(ifi->ifi_flags & IFF_UP);
-        }
-
-        /* --- carrier (graph signal) --- */
         bool carrier = (ifi->ifi_flags & IFF_LOWER_UP);
-        graph_set_signal(g, ifname, "carrier", carrier);
 
-        graph_evaluate(g);
+        if (graph_set_signal(g, ifname, "carrier", carrier)) {
+            graph_evaluate(g);
+        }
     }
 
     return 0;

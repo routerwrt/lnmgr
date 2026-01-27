@@ -17,6 +17,7 @@
 /* project */
 #include "graph.h"
 #include "lnmgr_status.h"
+#include "config.h"
 
 /*
  * Minimal lnmgr v0
@@ -28,9 +29,7 @@
  * - no sockets
  */
 
-int signals_handle_netlink(struct graph *g, int nl_fd,
-                           const char *watch_if,
-                           bool *admin_up_out);
+int signals_handle_netlink(struct graph *g, int nl_fd);
 
 static int nl_fd = -1;
 static volatile sig_atomic_t running = 1;
@@ -97,120 +96,73 @@ static int open_rtnetlink(void)
     return fd;
 }
 
-static struct lnmgr_explain last = {
-    .status = LNMGR_STATUS_UNKNOWN,
-    .code = NULL,
-};
-
-static void maybe_print_status(const char *ifname,
-                               struct lnmgr_explain *now)
-{
-    if (now->status == last.status &&
-        ((now->code == NULL && last.code == NULL) ||
-         (now->code && last.code &&
-          strcmp(now->code, last.code) == 0))) {
-        return;
-    }
-
-    printf("lnmgrd: %s -> %s", ifname,
-           lnmgr_status_str(now->status));
-    if (now->code)
-        printf(" (%s)", now->code);
-    printf("\n");
-
-    last = *now;
-}
-
 int main(int argc, char **argv)
 {
     if (argc != 2) {
-        fprintf(stderr, "usage: %s <ifname>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config.json>\n", argv[0]);
         return 1;
     }
-
-    const char *ifname = argv[1];
 
     setup_signals();
 
     signal(SIGINT, on_sigint);
     signal(SIGTERM, on_sigint);
 
-    printf("lnmgr: bringing up interface '%s'\n", ifname);
-
     struct graph *g = graph_create();
     if (!g) {
-        fprintf(stderr, "lnmgr: failed to create graph\n");
+        perror("graph_create");
         return 1;
     }
-    /* for testing only - until config parser done*/
-    /* testing-only heuristic */
-    bool require_carrier =
-                strncmp(ifname, "eth", 3) == 0 ||
-                strncmp(ifname, "veth", 4) == 0;
 
-    /* intent */
-    graph_add_node(g, ifname, NODE_DEVICE);
-
-    /* policy (temporary, until config exists) */
-    if (require_carrier) {
-       graph_add_signal(g, ifname, "carrier");
+    if (config_load_file(g, argv[1]) < 0) {
+        perror("config_load_file");
+        graph_destroy(g);
+        return 1;
     }
 
-    graph_enable_node(g, ifname);
+    printf("lnmgrd: configuration loaded, running (Ctrl+C to exit)\n");
 
-    /* evaluate */
-    graph_evaluate(g);
-
-    printf("lnmgr: graph evaluated, running (Ctrl+C to exit)\n");
-
-    nl_fd = open_rtnetlink();
+    int nl_fd = open_rtnetlink();
     if (nl_fd < 0) {
         perror("netlink");
+        graph_destroy(g);
         return 1;
     }
 
     if (netlink_request_getlink(nl_fd) < 0) {
         perror("RTM_GETLINK");
+        close(nl_fd);
+        graph_destroy(g);
         return 1;
     }
 
-    /* Initial link state sync */
-    bool admin_up = false;
-
     /* Drain RTM_GETLINK dump */
     for (;;) {
-        int rc = signals_handle_netlink(g, nl_fd, ifname, &admin_up);
+        int rc = signals_handle_netlink(g, nl_fd);
         if (rc < 0) {
             perror("signals_handle_netlink");
+            close(nl_fd);
+            graph_destroy(g);
             return 1;
         }
         if (rc == 1)
             break; /* NLMSG_DONE */
     }
 
-    /* === NEW: final convergence after dump === */
-    graph_evaluate(g);
+    printf("lnmgrd: initial link state synchronized\n");
 
-    struct explain gex = graph_explain_node(g, ifname);
-    struct lnmgr_explain lex = lnmgr_status_from_graph(&gex, admin_up);
-
-    maybe_print_status(ifname, &lex);
-
-    /* === Event loop === */
+    /* Event loop */
     while (running) {
-        int rc = signals_handle_netlink(g, nl_fd, ifname, &admin_up);
+        int rc = signals_handle_netlink(g, nl_fd);
         if (rc < 0) {
             perror("signals_handle_netlink");
             break;
         }
-
-        struct explain gex = graph_explain_node(g, ifname);
-        struct lnmgr_explain lex = lnmgr_status_from_graph(&gex, admin_up);
-
-        maybe_print_status(ifname, &lex);
     }
 
-    printf("lnmgr: shutting down\n");
+    printf("lnmgrd: shutting down\n");
+
+    close(nl_fd);
     graph_destroy(g);
     return 0;
 }
