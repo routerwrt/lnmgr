@@ -180,6 +180,23 @@ int graph_set_signal(struct graph *g,
     return 0;
 }
 
+int graph_flush(struct graph *g)
+{
+    /* Disable everything first (deactivate where appropriate) */
+    for (struct node *n = g->nodes; n; n = n->next) {
+        if (n->enabled)
+            graph_disable_node(g, n->id);
+    }
+
+    /* Free all nodes (and attached requires/signals) */
+    while (g->nodes) {
+        struct node *n = g->nodes;
+        g->nodes = n->next;
+        node_destroy(n);
+    }
+    return 0;
+}
+
 /*
  * Dependencies
  */
