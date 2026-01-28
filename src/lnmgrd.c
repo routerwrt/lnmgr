@@ -51,6 +51,8 @@
 #include "graph.h"
 #include "config.h"
 #include "socket.h"
+#include "signal/signal_netlink.h"
+#include "signal/signal_nl80211.h"
 
 #define LNMGR_SOCKET_PATH "/run/lnmgr.sock"
 
@@ -151,88 +153,64 @@ int main(int argc, char **argv)
 
     printf("lnmgrd: configuration loaded, running (Ctrl+C to exit)\n");
 
-    int sock_fd = socket_listen(LNMGR_SOCKET_PATH);
-    if (sock_fd < 0) {
-        perror("socket_listen");
-        return 1;
-    }
+    int ctl_fd  = socket_listen(LNMGR_SOCKET_PATH);
+    int nl_fd   = signal_netlink_fd();
+    int wifi_fd = signal_nl80211_fd();
 
-    int nl_fd = open_rtnetlink();
-    if (nl_fd < 0) {
-        perror("netlink");
+    if (ctl_fd < 0 || nl_fd < 0) {
+        perror("initialization failed");
         graph_destroy(g);
         return 1;
-    }
-
-    if (netlink_request_getlink(nl_fd) < 0) {
-        perror("RTM_GETLINK");
-        close(nl_fd);
-        graph_destroy(g);
-        return 1;
-    }
-
-    /* Drain RTM_GETLINK dump */
-    for (;;) {
-        int rc = signals_handle_netlink(g, nl_fd);
-        if (rc < 0) {
-            perror("signals_handle_netlink");
-            close(nl_fd);
-            graph_destroy(g);
-            return 1;
-        }
-        if (rc == 1)
-            break; /* NLMSG_DONE */
     }
 
     printf("lnmgrd: initial link state synchronized\n");
 
-    struct pollfd pfds[2];
-
-    pfds[0].fd = nl_fd;
-    pfds[0].events = POLLIN;
-
-    pfds[1].fd = sock_fd;
-    pfds[1].events = POLLIN;
-
-    /* Event loop */
     while (running) {
-        int rc = poll(pfds, 2, -1);
+        struct pollfd pfds[3];
+        nfds_t nfds = 0;
 
+        pfds[nfds++] = (struct pollfd){ .fd = nl_fd, .events = POLLIN };
+
+        if (wifi_fd >= 0)
+            pfds[nfds++] = (struct pollfd){ .fd = wifi_fd, .events = POLLIN };
+
+        pfds[nfds++] = (struct pollfd){ .fd = ctl_fd, .events = POLLIN };
+
+        int rc = poll(pfds, nfds, -1);
         if (rc < 0) {
             if (errno == EINTR)
-                continue;   /* signal: check running */
+                continue;
             perror("poll");
             break;
         }
 
-        /* --- netlink events --- */
-        if (pfds[0].revents & POLLIN) {
-            int r = signals_handle_netlink(g, nl_fd);
-            if (r < 0) {
-                perror("signals_handle_netlink");
-                break;
-            }
+        nfds_t i = 0;
+
+        if (pfds[i++].revents & POLLIN)
+            signal_netlink_handle(g);
+
+        if (wifi_fd >= 0) {
+            if (pfds[i++].revents & POLLIN)
+                signal_nl80211_handle(g);
         }
 
-        /* --- control socket events --- */
-        if (pfds[1].revents & POLLIN) {
-            int cfd = accept(sock_fd, NULL, NULL);
-            if (cfd >= 0) {
+        if (pfds[i].revents & POLLIN) {
+            int cfd;
+            while ((cfd = accept(ctl_fd, NULL, NULL)) >= 0) {
                 int r = socket_handle_client(cfd, g);
                 if (r == 0)
                     close(cfd);
-                /* r == 1 → subscriber, keep fd open */
             }
+            if (errno != EAGAIN && errno != EINTR)
+                perror("accept");
         }
     }
 
     printf("lnmgrd: shutting down\n");
 
-    socket_close(sock_fd, LNMGR_SOCKET_PATH);
-
-    if (nl_fd >= 0)
-        close(nl_fd);
-
+    socket_close(ctl_fd, LNMGR_SOCKET_PATH);
+    signal_netlink_close();
+    signal_nl80211_close();
     graph_destroy(g);
 
     return 0;

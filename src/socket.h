@@ -20,7 +20,14 @@ struct subscriber {
 /* create, bind, listen */
 int socket_listen(const char *path);
 
-/* accept + handle exactly one request */
+/*
+ * socket_handle_client()
+ *
+ * Returns:
+ *   0  → request handled, caller must close fd
+ *   1  → fd is a subscriber, caller must keep it open
+ *  -1  → protocol error, caller should close fd
+ */
 int socket_handle_client(int fd, struct graph *g);
 
 /* cleanup */
