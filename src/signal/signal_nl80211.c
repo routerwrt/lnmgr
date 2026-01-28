@@ -1,5 +1,6 @@
 #include <unistd.h>
 #include <errno.h>
+#include <stdbool.h>
 
 #include "signal_nl80211.h"
 
@@ -20,10 +21,11 @@ int signal_nl80211_fd(void)
     return -1;
 }
 
-void signal_nl80211_handle(struct graph *g)
+bool signal_nl80211_handle(struct graph *g)
 {
     (void)g;
     /* stub: nothing to do */
+    return false;
 }
 
 void signal_nl80211_close(void)

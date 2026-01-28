@@ -62,24 +62,20 @@ int signal_netlink_fd(void)
         return nl_fd;
 
     nl_fd = open_rtnetlink();
-    if (nl_fd < 0)
+    return nl_fd;
+}
+
+int signal_netlink_sync(struct graph *g)
+{
+    if (request_getlink(nl_fd) < 0)
         return -1;
 
-    if (request_getlink(nl_fd) < 0) {
-        close(nl_fd);
-        nl_fd = -1;
-        return -1;
-    }
-
-    /* Initial dump sync */
     for (;;) {
         char buf[4096];
-
         struct iovec iov = {
             .iov_base = buf,
             .iov_len  = sizeof(buf),
         };
-
         struct sockaddr_nl sa;
         struct msghdr msg = {
             .msg_name    = &sa,
@@ -90,14 +86,14 @@ int signal_netlink_fd(void)
 
         ssize_t len = recvmsg(nl_fd, &msg, 0);
         if (len < 0)
-            break;
+            return -1;
 
         for (struct nlmsghdr *nh = (struct nlmsghdr *)buf;
              NLMSG_OK(nh, len);
              nh = NLMSG_NEXT(nh, len)) {
 
             if (nh->nlmsg_type == NLMSG_DONE)
-                return nl_fd;
+                return 0;
 
             if (nh->nlmsg_type != RTM_NEWLINK)
                 continue;
@@ -106,7 +102,6 @@ int signal_netlink_fd(void)
             int attrlen = nh->nlmsg_len - NLMSG_LENGTH(sizeof(*ifi));
 
             const char *ifname = NULL;
-
             for (struct rtattr *rta = IFLA_RTA(ifi);
                  RTA_OK(rta, attrlen);
                  rta = RTA_NEXT(rta, attrlen)) {
@@ -121,18 +116,17 @@ int signal_netlink_fd(void)
                 continue;
 
             bool carrier = !!(ifi->ifi_flags & IFF_LOWER_UP);
-            graph_set_signal(NULL, ifname, "carrier", carrier);
+            graph_set_signal(g, ifname, "carrier", carrier);
         }
     }
-
-    return nl_fd;
 }
 
 /* ------------------------------------------------------------ */
 
-void signal_netlink_handle(struct graph *g)
+bool signal_netlink_handle(struct graph *g)
 {
     char buf[4096];
+    bool changed = false;
 
     struct iovec iov = {
         .iov_base = buf,
@@ -150,8 +144,8 @@ void signal_netlink_handle(struct graph *g)
     ssize_t len = recvmsg(nl_fd, &msg, 0);
     if (len < 0) {
         if (errno == EINTR)
-            return;
-        return;
+            return changed;
+        return changed;
     }
 
     for (struct nlmsghdr *nh = (struct nlmsghdr *)buf;
@@ -180,9 +174,10 @@ void signal_netlink_handle(struct graph *g)
             continue;
 
         bool carrier = !!(ifi->ifi_flags & IFF_LOWER_UP);
-        graph_set_signal(g, ifname, "carrier", carrier);
-        graph_evaluate(g);
+        changed |= graph_set_signal(g, ifname, "carrier", carrier);
     }
+
+    return changed;
 }
 
 /* ------------------------------------------------------------ */

@@ -19,7 +19,7 @@
 int  signal_netlink_fd(void);
 
 /* Handle one readable netlink event */
-void signal_netlink_handle(struct graph *g);
+bool signal_netlink_handle(struct graph *g);
 
 /* Close netlink socket */
 void signal_netlink_close(void);
