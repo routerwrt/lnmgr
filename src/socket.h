@@ -35,4 +35,6 @@ void socket_close(int fd, const char *path);
 
 void socket_add_subscriber(struct graph *g, int fd);
 
+void socket_notify_subscribers(struct graph *g, bool admin_up);
+
 #endif

@@ -68,6 +68,11 @@ static void notify_subscribers(struct graph *g, bool admin_up)
     }
 }
 
+void socket_notify_subscribers(struct graph *g, bool admin_up)
+{
+    notify_subscribers(g, admin_up);
+}
+
 static void send_snapshot(int fd, struct subscriber *s)
 {
     dprintf(fd, "{ \"type\": \"snapshot\", \"nodes\": [");
@@ -258,35 +263,6 @@ static void reply_dump(int fd, struct graph *g)
 static void reply_save(int fd, struct graph *g)
 {
     graph_save_json(g, fd);
-}
-
-static void reply_snapshot(int fd, struct graph *g)
-{
-    dprintf(fd, "{ \"type\": \"snapshot\", \"nodes\": [");
-
-    bool first = true;
-    for (struct node *n = g->nodes; n; n = n->next) {
-        struct explain gex = graph_explain_node(g, n->id);
-        struct lnmgr_explain lex =
-            lnmgr_status_from_graph(&gex, /* admin_up */ true);
-
-        if (!first)
-            dprintf(fd, ",");
-        first = false;
-
-        dprintf(fd,
-            "{ \"id\": \"%s\", \"state\": \"%s\"",
-            n->id,
-            lnmgr_status_to_str(lex.status));
-
-        const char *code = lnmgr_code_to_str(lex.code);
-        if (code)
-                dprintf(fd, ", \"code\": \"%s\"", code);    
- 
-        dprintf(fd, " }");
-    }
-
-    dprintf(fd, "] }\n");
 }
 
 static void handle_signal_cmd(int fd, struct graph *g, char *args)

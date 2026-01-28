@@ -55,6 +55,13 @@ struct lnmgr_explain current_status(struct graph *g,
     return lnmgr_status_from_graph(&gex, admin_up);
 }
 
+struct lnmgr_explain lnmgr_status_for_node(struct graph *g,
+                            struct node *n, bool admin_up)
+{
+    struct explain ex = graph_explain_node(g, n->id);
+    return lnmgr_status_from_graph(&ex, admin_up);
+}
+
 bool lnmgr_explain_equal(const struct lnmgr_explain *a,
                          const struct lnmgr_explain *b)
 {

@@ -181,6 +181,7 @@ void signal_netlink_handle(struct graph *g)
 
         bool carrier = !!(ifi->ifi_flags & IFF_LOWER_UP);
         graph_set_signal(g, ifname, "carrier", carrier);
+        graph_evaluate(g);
     }
 }
 

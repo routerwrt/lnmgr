@@ -147,16 +147,31 @@ int main(int argc, char **argv)
             break;
         }
 
+        bool changed = false;
         nfds_t i = 0;
 
-        if (pfds[i++].revents & POLLIN)
+        /* --- netlink carrier --- */
+        if (pfds[i++].revents & POLLIN) {
             signal_netlink_handle(g);
-
-        if (wifi_fd >= 0) {
-            if (pfds[i++].revents & POLLIN)
-                signal_nl80211_handle(g);
+            changed = true;
         }
 
+        /* --- nl80211 (wifi) --- */
+        if (wifi_fd >= 0) {
+            if (pfds[i++].revents & POLLIN) {
+                signal_nl80211_handle(g);
+                changed = true;
+            }
+        }
+
+        /* --- notify subscribers ONCE --- */
+        if (changed) {
+            socket_notify_subscribers(g, /* admin_up = */ true);
+            /* ^ if we later track admin intent per node,
+                 compute it here, not in signal code */
+        }
+
+        /* --- control socket --- */
         if (pfds[i].revents & POLLIN) {
             int cfd;
             while ((cfd = accept(ctl_fd, NULL, NULL)) >= 0) {
