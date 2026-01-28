@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,12 +28,24 @@ static int connect_socket(void)
     return fd;
 }
 
+static int write_all(int fd, const char *buf, size_t len)
+{
+    while (len > 0) {
+        ssize_t n = write(fd, buf, len);
+        if (n <= 0)
+            return -1;
+        buf += n;
+        len -= n;
+    }
+    return 0;
+}
+
 static int send_command(int fd, const char *cmd)
 {
     size_t len = strlen(cmd);
-    if (write(fd, cmd, len) != (ssize_t)len)
+    if (write_all(fd, cmd, len) < 0)
         return -1;
-    if (write(fd, "\n", 1) != 1)
+    if (write_all(fd, "\n", 1) < 0)
         return -1;
     return 0;
 }
@@ -66,18 +79,22 @@ static void usage(const char *argv0)
         "usage:\n"
         "  %s status [node]\n"
         "  %s dump\n"
-        "  %s save\n",
-        argv0, argv0, argv0);
+        "  %s save\n"
+        "  %s watch\n",
+        argv0, argv0, argv0, argv0);
 }
 
 int main(int argc, char **argv)
 {
+    bool want_watch = false;
+    char cmd[256];
+
     if (argc < 2) {
         usage(argv[0]);
         return 1;
     }
 
-    char cmd[256];
+    /* -------- command parsing -------- */
 
     if (strcmp(argv[1], "status") == 0) {
         if (argc == 2) {
@@ -88,22 +105,35 @@ int main(int argc, char **argv)
             usage(argv[0]);
             return 1;
         }
+
     } else if (strcmp(argv[1], "dump") == 0) {
         if (argc != 2) {
             usage(argv[0]);
             return 1;
         }
         snprintf(cmd, sizeof(cmd), "DUMP");
+
     } else if (strcmp(argv[1], "save") == 0) {
         if (argc != 2) {
             usage(argv[0]);
             return 1;
         }
         snprintf(cmd, sizeof(cmd), "SAVE");
+
+    } else if (strcmp(argv[1], "watch") == 0) {
+        if (argc != 2) {
+            usage(argv[0]);
+            return 1;
+        }
+        snprintf(cmd, sizeof(cmd), "SUBSCRIBE");
+        want_watch = true;
+
     } else {
         usage(argv[0]);
         return 1;
     }
+
+    /* -------- connect -------- */
 
     int fd = connect_socket();
     if (fd < 0) {
@@ -111,20 +141,41 @@ int main(int argc, char **argv)
         return 1;
     }
 
-     if (write(fd, "HELLO\n", 6) < 0) {
-        perror("write");
-        return 1;
-    }
+    /* -------- protocol handshake -------- */
 
-    read_reply(fd);
-
-    if (send_command(fd, cmd) < 0) {
-        perror("lnmgr: write");
+    if (write(fd, "HELLO\n", 6) != 6) {
+        perror("lnmgr: write HELLO");
         close(fd);
         return 1;
     }
 
-    read_and_print_reply(fd);
+    /* read HELLO reply */
+    read_reply(fd);
+
+    /* -------- send command -------- */
+
+    if (send_command(fd, cmd) < 0) {
+        perror("lnmgr: send command");
+        close(fd);
+        return 1;
+    }
+
+    /* -------- response handling -------- */
+
+    if (want_watch) {
+        /*
+         * SUBSCRIBE semantics:
+         *  - initial snapshot
+         *  - then infinite event stream
+         *  - only exits on error / EOF
+         */
+        read_and_print_reply(fd);
+        close(fd);
+        return 0;
+    }
+
+    /* one-shot commands */
+    read_reply(fd);
     close(fd);
     return 0;
 }

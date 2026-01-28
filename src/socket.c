@@ -54,7 +54,7 @@ static void notify_subscribers(struct graph *g, bool admin_up)
         for (struct node *n = g->nodes; n; n = n->next) {
 
             struct lnmgr_explain now =
-                lnmgr_status_for_node(g, n, admin_up);
+                    lnmgr_status_for_node(g, n, admin_up);
 
             struct lnmgr_explain *prev =
                 subscriber_last(s, n);
