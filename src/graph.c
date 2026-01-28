@@ -169,12 +169,22 @@ int graph_set_signal(struct graph *g,
                      bool value)
 {
     struct node *n = graph_find_node(g, node_id);
-    if (!n)
+    if (!n || !signal)
         return -1;
 
     struct signal *s = find_signal(n, signal);
-    if (!s)
-        return -1;
+    if (!s) {
+        /* dynamic signal */
+        s = calloc(1, sizeof(*s));
+        if (!s)
+            return -1;
+
+        s->name = strdup(signal);
+        s->value = value;
+        s->next = n->signals;
+        n->signals = s;
+        return 0;
+    }
 
     s->value = value;
     return 0;

@@ -238,6 +238,41 @@ static void reply_snapshot(int fd, struct graph *g)
     dprintf(fd, "] }\n");
 }
 
+static void handle_signal_cmd(int fd, struct graph *g, char *args)
+{
+    char node[64], sig[64];
+    int val;
+
+    if (sscanf(args, "%63s %63s %d", node, sig, &val) != 3) {
+        dprintf(fd, "{ \"error\": \"invalid syntax\" }\n");
+        return;
+    }
+
+    if (val != 0 && val != 1) {
+        dprintf(fd, "{ \"error\": \"invalid value\" }\n");
+        return;
+    }
+
+    if (!graph_find_node(g, node)) {
+        dprintf(fd, "{ \"error\": \"unknown node\" }\n");
+        return;
+    }
+
+    if (graph_set_signal(g, node, sig, val) < 0) {
+        dprintf(fd, "{ \"error\": \"signal rejected\" }\n");
+        return;
+    }
+
+    graph_evaluate(g);
+
+    dprintf(fd,
+        "{ \"type\": \"signal\", "
+        "\"node\": \"%s\", "
+        "\"signal\": \"%s\", "
+        "\"value\": %s }\n",
+        node, sig, val ? "true" : "false");
+}
+
 int socket_handle_client(int client_fd, struct graph *g)
 {
     char line[256];
@@ -261,6 +296,9 @@ int socket_handle_client(int client_fd, struct graph *g)
         add_subscriber(client_fd);
         reply_snapshot(client_fd, g);
         return 1;   /* keep socket open */
+    
+    } else if (strncmp(line, "SIGNAL ", 7) == 0) {
+        handle_signal_cmd(client_fd, g, line + 7);
     
     } else if (strcmp(line, "HELLO") == 0) {
            dprintf(client_fd,
