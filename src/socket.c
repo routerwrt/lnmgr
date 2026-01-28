@@ -12,35 +12,6 @@
 
 static struct subscriber *subscribers = NULL;
 
-static void add_subscriber(int fd)
-{
-    struct subscriber *s = calloc(1, sizeof(*s));
-    if (!s) {
-        close(fd);
-        return;
-    }
-
-    s->fd = fd;
-    s->next = subscribers;
-    subscribers = s;
-}
-
-static void drop_subscriber(struct subscriber *prev, struct subscriber *s)
-{
-    if (prev)
-        prev->next = s->next;
-    else
-        subscribers = s->next;
-
-    close(s->fd);
-    free(s);
-}
-
-void socket_add_subscriber(int fd)
-{
-    add_subscriber(fd);
-}
-
 static struct lnmgr_explain *
 subscriber_last(struct subscriber *s, struct node *n)
 {
@@ -95,6 +66,86 @@ static void notify_subscribers(struct graph *g, bool admin_up)
             *prev = now;
         }
     }
+}
+
+static void send_snapshot(int fd, struct subscriber *s)
+{
+    dprintf(fd, "{ \"type\": \"snapshot\", \"nodes\": [");
+
+    bool first = true;
+    for (struct node_state *ns = s->states; ns; ns = ns->next) {
+        if (!first)
+            dprintf(fd, ",");
+        first = false;
+
+        dprintf(fd,
+            "{ \"id\": \"%s\", \"state\": \"%s\"",
+            ns->id,
+            lnmgr_status_to_str(ns->last.status));
+
+        const char *code = lnmgr_code_to_str(ns->last.code);
+        if (code)
+            dprintf(fd, ", \"code\": \"%s\"", code);
+
+        dprintf(fd, " }");
+    }
+
+    dprintf(fd, "] }\n");
+}
+
+static void subscriber_init_states(struct subscriber *s, struct graph *g)
+{
+    struct node_state *tail = NULL;
+
+    for (struct node *n = g->nodes; n; n = n->next) {
+        struct node_state *ns = calloc(1, sizeof(*ns));
+        if (!ns)
+            continue;
+
+        ns->id = strdup(n->id);
+
+        struct explain gex = graph_explain_node(g, n->id);
+        ns->last = lnmgr_status_from_graph(&gex, true /* admin_up placeholder */);
+
+        if (!tail)
+            s->states = ns;
+        else
+            tail->next = ns;
+
+        tail = ns;
+    }
+}
+
+static void add_subscriber(int fd, struct graph *g)
+{
+    struct subscriber *s = calloc(1, sizeof(*s));
+    if (!s) {
+        close(fd);
+        return;
+    }
+
+    s->fd = fd;
+    subscriber_init_states(s, g);
+    send_snapshot(fd, s);
+
+    s->next = subscribers;
+    subscribers = s;
+}
+
+static void drop_subscriber(struct subscriber *prev, struct subscriber *s)
+{
+    if (prev)
+        prev->next = s->next;
+    else
+        subscribers = s->next;
+
+    close(s->fd);
+    free(s);
+}
+
+void socket_add_subscriber(struct graph *g, int fd)
+{
+    add_subscriber(fd, g);
 }
 
 int socket_listen(const char *path)
@@ -293,9 +344,8 @@ int socket_handle_client(int client_fd, struct graph *g)
         reply_save(client_fd, g);
 
     } else if (strcmp(line, "SUBSCRIBE") == 0) {
-        add_subscriber(client_fd);
-        reply_snapshot(client_fd, g);
-        return 1;   /* keep socket open */
+       add_subscriber(client_fd, g);
+        return 1;   /* keep connection open */
     
     } else if (strncmp(line, "SIGNAL ", 7) == 0) {
         handle_signal_cmd(client_fd, g, line + 7);
@@ -312,6 +362,7 @@ int socket_handle_client(int client_fd, struct graph *g)
 
     return 0;
 }
+
 void socket_close(int fd, const char *path)
 {
     if (fd >= 0)
