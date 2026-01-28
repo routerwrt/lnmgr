@@ -76,25 +76,6 @@ static void on_sigint(int sig)
     running = 0;
 }
 
-static int netlink_request_getlink(int nl_fd)
-{
-    struct {
-        struct nlmsghdr nh;
-        struct ifinfomsg ifm;
-    } req;
-
-    memset(&req, 0, sizeof(req));
-
-    req.nh.nlmsg_len   = NLMSG_LENGTH(sizeof(struct ifinfomsg));
-    req.nh.nlmsg_type  = RTM_GETLINK;
-    req.nh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
-    req.nh.nlmsg_seq   = 1;
-
-    req.ifm.ifi_family = AF_UNSPEC;
-
-    return send(nl_fd, &req, req.nh.nlmsg_len, 0);
-}
-
 static void setup_signals(void)
 {
     struct sigaction sa;
@@ -108,24 +89,6 @@ static void setup_signals(void)
     sigaction(SIGTERM, &sa, NULL);
 }
 
-static int open_rtnetlink(void)
-{
-    int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
-    if (fd < 0)
-        return -1;
-
-    struct sockaddr_nl sa = {
-        .nl_family = AF_NETLINK,
-        .nl_groups = RTMGRP_LINK,
-    };
-
-    if (bind(fd, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-        close(fd);
-        return -1;
-    }
-
-    return fd;
-}
 
 int main(int argc, char **argv)
 {
