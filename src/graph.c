@@ -163,31 +163,39 @@ int graph_add_signal(struct graph *g,
     return 0;
 }
 
-int graph_set_signal(struct graph *g,
-                     const char *node_id,
-                     const char *signal,
-                     bool value)
+bool graph_set_signal(struct graph *g,
+                      const char *node_id,
+                      const char *signal,
+                      bool value)
 {
     struct node *n = graph_find_node(g, node_id);
     if (!n || !signal)
-        return -1;
+        return false;
 
     struct signal *s = find_signal(n, signal);
     if (!s) {
         /* dynamic signal */
         s = calloc(1, sizeof(*s));
         if (!s)
-            return -1;
+            return false;
 
         s->name = strdup(signal);
+        if (!s->name) {
+            free(s);
+            return false;
+        }
+
         s->value = value;
         s->next = n->signals;
         n->signals = s;
-        return 0;
+        return true; /* NEW signal => changed */
     }
 
+    if (s->value == value)
+        return false; /* no change */
+
     s->value = value;
-    return 0;
+    return true;
 }
 
 int graph_flush(struct graph *g)
@@ -315,47 +323,42 @@ static bool signals_met(struct node *n)
     return true;
 }
 
-void graph_evaluate(struct graph *g)
+bool graph_evaluate(struct graph *g)
 {
-    /* Phase 0: auto participation + activation */
+    bool changed = false;
+
+    /* Phase 0: auto participation */
     for (struct node *n = g->nodes; n; n = n->next) {
-        if (!n->enabled)
+        if (!n->enabled || !n->auto_up)
             continue;
 
-        if (!n->auto_up)
-            continue;
-
-        if (n->state != NODE_INACTIVE)
-            continue;
-
-        if (n->activated)
-            continue;
-
-        n->state = NODE_WAITING;
-        n->activated = true;
+        if (n->state == NODE_INACTIVE) {
+            n->state = NODE_WAITING;
+            changed = true;
+        }
     }
- 
+
     /* Phase 1: reset DFS marks */
     for (struct node *n = g->nodes; n; n = n->next)
         n->dfs = DFS_WHITE;
 
-    /* detect cycles */
+    /* Cycle detection */
     for (struct node *n = g->nodes; n; n = n->next) {
         if (n->enabled && n->dfs == DFS_WHITE) {
             if (dfs_cycle(n)) {
-                /* mark all enabled nodes as FAILED */
                 for (struct node *m = g->nodes; m; m = m->next) {
-                    if (m->enabled) {
+                    if (m->enabled && m->state != NODE_FAILED) {
                         m->state = NODE_FAILED;
                         m->fail_reason = FAIL_CYCLE;
+                        changed = true;
                     }
                 }
-                return;
+                return changed;
             }
         }
     }
 
-    /*  evaluation logic */
+    /* Phase 2+3: evaluate */
     bool progress;
     do {
         progress = false;
@@ -363,22 +366,24 @@ void graph_evaluate(struct graph *g)
         for (struct node *n = g->nodes; n; n = n->next) {
             if (!n->enabled)
                 continue;
- 
-            /* Phase 0: demotion on signal loss (NO deactivation) */
+
+            /* Demotion on signal loss */
             if (n->state == NODE_ACTIVE && !signals_met(n)) {
                 n->state = NODE_WAITING;
                 progress = true;
+                changed = true;
             }
 
-            /* Phase 1: activation (do NOT require signals) */
+            /* Activation (runs once per enable-cycle) */
             if (n->state == NODE_WAITING &&
-                            requirements_met(n) &&
-                            !n->activated) {
+                requirements_met(n) &&
+                !n->activated) {
+
                 if (n->actions && n->actions->activate) {
-                    action_result_t r = n->actions->activate(n);
-                    if (r != ACTION_OK) {
+                    if (n->actions->activate(n) != ACTION_OK) {
                         n->state = NODE_FAILED;
                         n->fail_reason = FAIL_ACTION;
+                        changed = true;
                         continue;
                     }
                 }
@@ -386,17 +391,20 @@ void graph_evaluate(struct graph *g)
                 n->activated = true;
             }
 
-            /* Phase 2: readiness (signals decide ACTIVE state) */
+            /* Readiness */
             if (n->state == NODE_WAITING &&
                 requirements_met(n) &&
                 signals_met(n)) {
 
                 n->state = NODE_ACTIVE;
                 progress = true;
+                changed = true;
             }
         }
 
     } while (progress);
+
+    return changed;
 }
 
 struct explain graph_explain_node(struct graph *g, const char *id)

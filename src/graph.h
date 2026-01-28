@@ -146,7 +146,7 @@ int graph_enable_node(struct graph *g, const char *id);
 int graph_disable_node(struct graph *g, const char *id);
 
 /* evaluation */
-void graph_evaluate(struct graph *g);
+bool graph_evaluate(struct graph *g);
 
 struct explain graph_explain_node(struct graph *g, const char *id);
 
@@ -154,7 +154,7 @@ int graph_add_signal(struct graph *g,
                      const char *node_id,
                      const char *signal);
 
-int graph_set_signal(struct graph *g,
+bool graph_set_signal(struct graph *g,
                      const char *node_id,
                      const char *signal,
                      bool value);
