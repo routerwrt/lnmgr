@@ -89,7 +89,6 @@ static void setup_signals(void)
     sigaction(SIGTERM, &sa, NULL);
 }
 
-
 int main(int argc, char **argv)
 {
     if (argc != 2) {
@@ -98,7 +97,6 @@ int main(int argc, char **argv)
     }
 
     setup_signals();
-
     signal(SIGINT, on_sigint);
     signal(SIGTERM, on_sigint);
 
@@ -114,7 +112,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    printf("lnmgrd: configuration loaded, running (Ctrl+C to exit)\n");
+    /* ---------- control + signal init ---------- */
 
     int ctl_fd  = socket_listen(LNMGR_SOCKET_PATH);
     int nl_fd   = signal_netlink_fd();
@@ -126,7 +124,14 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    printf("lnmgrd: initial link state synchronized\n");
+    /* ---------- initial evaluation (AUTO + config) ---------- */
+
+    graph_evaluate(g);
+    socket_notify_subscribers(g, /* admin_up = */ true);
+
+    printf("lnmgrd: configuration loaded, running (Ctrl+C to exit)\n");
+
+    /* ---------- main event loop ---------- */
 
     while (running) {
         struct pollfd pfds[3];
@@ -151,36 +156,31 @@ int main(int argc, char **argv)
         nfds_t i = 0;
 
         /* --- netlink carrier --- */
-        if (pfds[i++].revents & POLLIN) {
-            signal_netlink_handle(g);
-            changed = true;
-        }
+        if (pfds[i++].revents & POLLIN)
+            changed |= signal_netlink_handle(g);
 
-        /* --- nl80211 (wifi) --- */
+        /* --- nl80211 wifi --- */
         if (wifi_fd >= 0) {
-            if (pfds[i++].revents & POLLIN) {
-                signal_nl80211_handle(g);
-                changed = true;
-            }
+            if (pfds[i++].revents & POLLIN)
+                changed |= signal_nl80211_handle(g);
         }
 
-        /* --- notify subscribers ONCE --- */
+        /* --- evaluate ONCE --- */
         if (changed) {
-            socket_notify_subscribers(g, /* admin_up = */ true);
-            /* ^ if we later track admin intent per node,
-                 compute it here, not in signal code */
+            if (graph_evaluate(g))
+                socket_notify_subscribers(g, /* admin_up = */ true);
         }
 
         /* --- control socket --- */
         if (pfds[i].revents & POLLIN) {
-            int cfd;
-            while ((cfd = accept(ctl_fd, NULL, NULL)) >= 0) {
+            int cfd = accept(ctl_fd, NULL, NULL);
+            if (cfd >= 0) {
                 int r = socket_handle_client(cfd, g);
                 if (r == 0)
                     close(cfd);
-            }
-            if (errno != EAGAIN && errno != EINTR)
+            } else if (errno != EAGAIN && errno != EINTR) {
                 perror("accept");
+            }
         }
     }
 

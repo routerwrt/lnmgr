@@ -125,7 +125,7 @@ static void add_subscriber(int fd, struct graph *g)
 {
     struct subscriber *s = calloc(1, sizeof(*s));
     if (!s) {
-        close(fd);
+        /* DO NOT close(fd) */
         return;
     }
 
@@ -285,58 +285,72 @@ static void handle_signal_cmd(int fd, struct graph *g, char *args)
         return;
     }
 
-    if (graph_set_signal(g, node, sig, val) < 0) {
-        dprintf(fd, "{ \"error\": \"signal rejected\" }\n");
-        return;
-    }
+    bool changed = graph_set_signal(g, node, sig, val);
 
-    graph_evaluate(g);
+    if (changed) {
+        graph_evaluate(g);
+        socket_notify_subscribers(g, /* admin_up = */ true);
+    }
 
     dprintf(fd,
         "{ \"type\": \"signal\", "
         "\"node\": \"%s\", "
         "\"signal\": \"%s\", "
-        "\"value\": %s }\n",
-        node, sig, val ? "true" : "false");
+        "\"value\": %s, "
+        "\"changed\": %s }\n",
+        node,
+        sig,
+        val ? "true" : "false",
+        changed ? "true" : "false");
 }
 
-int socket_handle_client(int client_fd, struct graph *g)
+int socket_handle_client(int fd, struct graph *g)
 {
     char line[256];
 
-    if (read_line(client_fd, line, sizeof(line)) <= 0)
-        return -1;
+    for (;;) {
+        if (read_line(fd, line, sizeof(line)) <= 0)
+            return 0;   /* client closed */
 
-    if (strcmp(line, "STATUS") == 0) {
-        reply_status_all(client_fd, g);
-
-    } else if (strncmp(line, "STATUS ", 7) == 0) {
-        reply_status_one(client_fd, g, line + 7);
-
-    } else if (strcmp(line, "DUMP") == 0) {
-        reply_dump(client_fd, g);
-
-    } else if (strcmp(line, "SAVE") == 0) {
-        reply_save(client_fd, g);
-
-    } else if (strcmp(line, "SUBSCRIBE") == 0) {
-       add_subscriber(client_fd, g);
-        return 1;   /* keep connection open */
-    
-    } else if (strncmp(line, "SIGNAL ", 7) == 0) {
-        handle_signal_cmd(client_fd, g, line + 7);
-    
-    } else if (strcmp(line, "HELLO") == 0) {
-           dprintf(client_fd,
-               "{ \"type\": \"hello\", \"version\": 1, "
+        if (strcmp(line, "HELLO") == 0) {
+            dprintf(fd,
+                "{ \"type\": \"hello\", \"version\": 1, "
                 "\"features\": [\"status\",\"dump\",\"save\",\"subscribe\"] }\n");
-            return 0;
+            continue;
+        }
 
-    } else {
-        dprintf(client_fd, "{ \"error\": \"unknown command\" }\n");
+        if (strcmp(line, "SUBSCRIBE") == 0) {
+            add_subscriber(fd, g);
+            return 1;   /* daemon must NOT close fd */
+        }
+
+        if (strcmp(line, "STATUS") == 0) {
+            reply_status_all(fd, g);
+            continue;
+        }
+
+        if (strncmp(line, "STATUS ", 7) == 0) {
+            reply_status_one(fd, g, line + 7);
+            continue;
+        }
+
+        if (strcmp(line, "DUMP") == 0) {
+            reply_dump(fd, g);
+            continue;
+        }
+
+        if (strcmp(line, "SAVE") == 0) {
+            reply_save(fd, g);
+            continue;
+        }
+
+        if (strncmp(line, "SIGNAL ", 7) == 0) {
+            handle_signal_cmd(fd, g, line + 7);
+            continue;
+        }
+
+        dprintf(fd, "{ \"error\": \"unknown command\" }\n");
     }
-
-    return 0;
 }
 
 void socket_close(int fd, const char *path)
