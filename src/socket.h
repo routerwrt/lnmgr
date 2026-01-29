@@ -5,14 +5,26 @@
 
 struct graph;
 
+struct signal_state {
+    char *name;
+    bool value;
+
+    struct signal_state *next;
+};
+
+struct node_state {
+    char *id;                      /* node id */
+    struct lnmgr_explain last;     /* last state/code seen */
+
+    struct signal_state *signals;  /* NEW: per-subscriber signal snapshot */
+
+    struct node_state *next;
+};
+
 struct subscriber {
     int fd;
 
-    struct node_state {
-        char *id;
-        struct lnmgr_explain last;
-        struct node_state *next;
-    } *states;
+    struct node_state *states;
 
     struct subscriber *next;
 };

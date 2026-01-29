@@ -34,6 +34,79 @@ static void json_emit_signals(int fd, struct node *n)
     dprintf(fd, "}");
 }
 
+static struct node_state *
+subscriber_get_node(struct subscriber *s, const char *id)
+{
+    for (struct node_state *ns = s->states; ns; ns = ns->next) {
+        if (strcmp(ns->id, id) == 0)
+            return ns;
+    }
+
+    struct node_state *ns = calloc(1, sizeof(*ns));
+    if (!ns)
+        return NULL;
+
+    ns->id = strdup(id);
+    if (!ns->id) {
+        free(ns);
+        return NULL;
+    }
+
+    ns->last.status = LNMGR_STATUS_UNKNOWN;
+    ns->last.code   = LNMGR_CODE_NONE;
+
+    ns->next = s->states;
+    s->states = ns;
+
+    return ns;
+}
+
+static struct signal_state *
+signal_state_get(struct signal_state **list, const char *name)
+{
+    for (struct signal_state *ss = *list; ss; ss = ss->next) {
+        if (strcmp(ss->name, name) == 0)
+            return ss;
+    }
+
+    struct signal_state *ss = calloc(1, sizeof(*ss));
+    if (!ss)
+        return NULL;
+
+    ss->name = strdup(name);
+    if (!ss->name) {
+        free(ss);
+        return NULL;
+    }
+
+    ss->value = false;
+
+    ss->next = *list;
+    *list = ss;
+
+    return ss;
+}
+
+static bool
+signals_changed(struct node_state *ns, struct node *n)
+{
+    bool changed = false;
+
+    for (struct signal *s = n->signals; s; s = s->next) {
+        struct signal_state *ss =
+            signal_state_get(&ns->signals, s->name);
+        if (!ss)
+            continue;
+
+        if (ss->value != s->value) {
+            ss->value = s->value;
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
 static struct lnmgr_explain *
 subscriber_last(struct subscriber *s, struct node *n)
 {
@@ -84,16 +157,30 @@ static void notify_subscribers(struct graph *g, bool admin_up)
         for (struct node *n = g->nodes; n; n = n->next) {
 
             struct lnmgr_explain now =
-                    lnmgr_status_for_node(g, n, admin_up);
+                lnmgr_status_for_node(g, n, admin_up);
 
-            struct lnmgr_explain *prev =
-                subscriber_last(s, n);
+            struct node_state *ns =
+                subscriber_get_node(s, n->id);
+            if (!ns)
+                continue;
 
-            if (lnmgr_explain_equal(prev, &now))
+            bool changed = false;
+
+            /* ---- state / code diff ---- */
+            if (ns->last.status != now.status ||
+                ns->last.code   != now.code) {
+
+                ns->last = now;
+                changed = true;
+            }
+
+            /* ---- signal diff ---- */
+            changed |= signals_changed(ns, n);
+
+            if (!changed)
                 continue;
 
             socket_send_event(s->fd, g, n->id, &now);
-            *prev = now;
         }
     }
 }
