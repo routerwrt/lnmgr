@@ -56,6 +56,38 @@ static int request_getlink(int fd)
 }
 
 /* ------------------------------------------------------------ */
+/* link type detection                                          */
+
+static bool link_is_bridge(struct ifinfomsg *ifi, int attrlen)
+{
+    struct rtattr *rta;
+
+    for (rta = IFLA_RTA(ifi);
+         RTA_OK(rta, attrlen);
+         rta = RTA_NEXT(rta, attrlen)) {
+
+        if (rta->rta_type != IFLA_LINKINFO)
+            continue;
+
+        struct rtattr *li;
+        int rem = RTA_PAYLOAD(rta);
+
+        for (li = RTA_DATA(rta);
+             RTA_OK(li, rem);
+             li = RTA_NEXT(li, rem)) {
+
+            if (li->rta_type != IFLA_INFO_KIND)
+                continue;
+
+            const char *kind = RTA_DATA(li);
+            return strcmp(kind, "bridge") == 0;
+        }
+    }
+
+    return false;
+}
+
+/* ------------------------------------------------------------ */
 /* common link → signal translation                             */
 
 static bool clear_link_state(struct graph *g, const char *ifname)
@@ -71,17 +103,19 @@ static bool clear_link_state(struct graph *g, const char *ifname)
 
 static bool apply_link_state(struct graph *g,
                              const char *ifname,
-                             unsigned int flags)
+                             unsigned int flags,
+                             bool is_bridge)
 {
     bool changed = false;
 
-    bool carrier  = !!(flags & IFF_LOWER_UP);
-    bool admin_up = !!(flags & IFF_UP);
-    bool running  = !!(flags & IFF_RUNNING);
+    changed |= graph_set_signal(g, ifname, "carrier",
+                                !!(flags & IFF_LOWER_UP));
+    changed |= graph_set_signal(g, ifname, "admin_up",
+                                !!(flags & IFF_UP));
+    changed |= graph_set_signal(g, ifname, "running",
+                                !!(flags & IFF_RUNNING));
 
-    changed |= graph_set_signal(g, ifname, "carrier",  carrier);
-    changed |= graph_set_signal(g, ifname, "admin_up", admin_up);
-    changed |= graph_set_signal(g, ifname, "running",  running);
+    changed |= graph_set_signal(g, ifname, "bridge", is_bridge);
 
     return changed;
 }
@@ -151,7 +185,12 @@ int signal_netlink_sync(struct graph *g)
             if (!ifname)
                 continue;
 
-            apply_link_state(g, ifname, ifi->ifi_flags);
+            bool is_bridge = link_is_bridge(ifi, attrlen);
+
+            /* kernel fact → signal */
+            graph_set_signal(g, ifname, "bridge", is_bridge);
+
+            apply_link_state(g, ifname, ifi->ifi_flags, is_bridge);
         }
     }
 }
@@ -215,7 +254,11 @@ bool signal_netlink_handle(struct graph *g)
         }
 
         /* RTM_NEWLINK */
-        changed |= apply_link_state(g, ifname, ifi->ifi_flags);
+        bool is_bridge = link_is_bridge(ifi, attrlen);
+
+        changed |= apply_link_state(g, ifname,
+                            ifi->ifi_flags,
+                            is_bridge);
     }
 
     return changed;

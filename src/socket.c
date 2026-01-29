@@ -107,25 +107,6 @@ signals_changed(struct node_state *ns, struct node *n)
     return changed;
 }
 
-static struct lnmgr_explain *
-subscriber_last(struct subscriber *s, struct node *n)
-{
-    struct node_state *st;
-
-    for (st = s->states; st; st = st->next) {
-        if (strcmp(st->id, n->id) == 0)
-            return &st->last;
-    }
-
-    st = calloc(1, sizeof(*st));
-    st->id = strdup(n->id);
-    st->last.status = LNMGR_STATUS_UNKNOWN;
-    st->next = s->states;
-    s->states = st;
-
-    return &st->last;
-}
-
 static void socket_send_event(int fd,
                               struct graph *g,
                               const char *id,
@@ -200,19 +181,29 @@ static void send_snapshot(int fd, struct subscriber *s, struct graph *g)
             dprintf(fd, ",");
         first = false;
 
+        struct node *n = graph_find_node(g, ns->id);
+
         dprintf(fd,
             "{ \"id\": \"%s\", \"state\": \"%s\"",
             ns->id,
             lnmgr_status_to_str(ns->last.status));
 
+        /* node type */
+        if (n) {
+            dprintf(fd,
+                ", \"type\": \"%s\"",
+                node_type_to_str(n->type));
+        }
+
+        /* optional code */
         const char *code = lnmgr_code_to_str(ns->last.code);
         if (code)
             dprintf(fd, ", \"code\": \"%s\"", code);
 
-        struct node *n = graph_find_node(g, ns->id);
+        /* signals */
         if (n)
             json_emit_signals(fd, n);
-  
+
         dprintf(fd, " }");
     }
 
@@ -369,11 +360,36 @@ static void reply_dump(int fd, struct graph *g)
         first = false;
 
         dprintf(fd,
-            "{ \"id\": \"%s\", \"type\": \"%s\", \"enabled\": %s, \"auto\": %s }",
-                n->id,
-                node_type_to_str(n->type),
-                n->enabled ? "true" : "false",
-                n->auto_up ? "true" : "false");
+            "{ \"id\": \"%s\", "
+            "\"type\": \"%s\", "
+            "\"enabled\": %s, "
+            "\"auto\": %s",
+            n->id,
+            node_type_to_str(n->type),
+            n->enabled ? "true" : "false",
+            n->auto_up ? "true" : "false");
+
+        /* ---- requires[] ---- */
+        dprintf(fd, ", \"requires\": [");
+        bool rfirst = true;
+        for (struct require *r = n->requires; r; r = r->next) {
+            if (!rfirst)
+                dprintf(fd, ",");
+            rfirst = false;
+
+            dprintf(fd, "\"%s\"", r->node->id);
+        }
+        dprintf(fd, "]");
+
+        /* ---- actions (presence only) ---- */
+        dprintf(fd,
+            ", \"actions\": { "
+            "\"activate\": %s, "
+            "\"deactivate\": %s }",
+            (n->actions && n->actions->activate)   ? "true" : "false",
+            (n->actions && n->actions->deactivate) ? "true" : "false");
+
+        dprintf(fd, " }");
 
         n = n->next;
     }
