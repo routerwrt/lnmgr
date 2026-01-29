@@ -92,6 +92,9 @@ struct require {
 /*
  * Graph node
  */
+
+
+ 
 struct node {
     char                *id;
     node_type_t         type;
@@ -109,6 +112,15 @@ struct node {
      * - dfs: used only for cycle detection
      */
     dfs_mark_t          dfs;            /* cycle detection */
+
+    /* Topology (kernel-derived, not config intent)
+     * - master/slave relationships only
+     * - roles (bridge, port, standalone) are derived in evaluation
+    */
+    struct node         *master;
+    struct node         *slaves;
+    struct node         *slave_next;
+
     struct node         *next;
 };
 
