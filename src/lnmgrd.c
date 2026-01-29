@@ -166,33 +166,15 @@ int main(int argc, char **argv)
         nfds_t i = 0;
 
         /* ---------- netlink carrier ---------- */
-        if (pfds[i].revents & (POLLERR | POLLHUP)) {
-            /* future: reopen netlink */
-            i++;
-        } else if (pfds[i].revents & POLLIN) {
+        if (pfds[i].revents & POLLIN)
             changed |= signal_netlink_handle(g);
-            i++;
-        } else {
-            i++;
-        }
+        i++;
 
         /* ---------- nl80211 wifi ---------- */
         if (wifi_fd >= 0) {
-            if (pfds[i].revents & (POLLERR | POLLHUP)) {
-                /* future: reopen nl80211 */
-                i++;
-            } else if (pfds[i].revents & POLLIN) {
+            if (pfds[i].revents & POLLIN)
                 changed |= signal_nl80211_handle(g);
-                i++;
-            } else {
-                i++;
-            }
-        }
-
-        /* ---------- evaluate ONCE ---------- */
-        if (changed) {
-            if (graph_evaluate(g))
-                socket_notify_subscribers(g, /* admin_up = */ true);
+            i++;
         }
 
         /* ---------- control socket ---------- */
@@ -200,14 +182,8 @@ int main(int argc, char **argv)
             for (;;) {
                 int cfd = accept(ctl_fd, NULL, NULL);
                 if (cfd >= 0) {
-                    bool local_changed = false;
-
-                    int r = socket_handle_client(cfd, g, &local_changed);
-                    if (local_changed) {
-                        if (graph_evaluate(g))
-                            socket_notify_subscribers(g, /* admin_up = */ true);
-                    }
-
+                    int r = socket_handle_client(cfd, g);
+                    changed = true;   /* socket commands may mutate graph */
                     if (r == 0)
                         close(cfd);
                     continue;
@@ -220,8 +196,14 @@ int main(int argc, char **argv)
                 break;
             }
         }
-    }
 
+        /* ---------- evaluate + notify ONCE ---------- */
+        if (changed) {
+            if (graph_evaluate(g))
+                socket_notify_subscribers(g, /* admin_up */ true);
+        }
+    }
+    
     printf("lnmgrd: shutting down\n");
 
     socket_close(ctl_fd, LNMGR_SOCKET_PATH);

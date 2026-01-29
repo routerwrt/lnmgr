@@ -163,6 +163,13 @@ int graph_add_signal(struct graph *g,
     return 0;
 }
 
+/*
+ * Sets a signal value on a node.
+ *
+ * Returns:
+ *   true  - signal value changed (new or updated)
+ *   false - no change or error
+ */
 bool graph_set_signal(struct graph *g,
                       const char *node_id,
                       const char *signal,
