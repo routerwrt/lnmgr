@@ -1,5 +1,7 @@
 CC ?= cc
-CFLAGS ?= -Wall -Wextra -O2
+
+CFLAGS ?=
+CFLAGS += -Wall -Wextra
 CFLAGS += -Isrc
 
 DAEMON_CFLAGS = $(CFLAGS) -DLNMGR_DEBUG
@@ -18,19 +20,18 @@ SRC = \
     src/enum_str.c \
     src/protocol.c \
     src/signal/signal_netlink.c \
-    src/signal/signal_nl80211.c \
-    
+    src/signal/signal_nl80211.c
 
 OBJ = $(SRC:.c=.o)
 
 lnmgrd: $(OBJ)
-	$(CC) $(DAEMON_CFLAGS) -o $@ $(OBJ)
+	$(CC) $(LDFLAGS) -o $@ $(OBJ)
 
 CLI_SRC = cli/lnmgr.c
 CLI_OBJ = $(CLI_SRC:.c=.o)
 
 lnmgr: $(CLI_OBJ)
-	$(CC) $(CLI_CFLAGS) -o $@ $(CLI_OBJ)
+	$(CC) $(LDFLAGS) -o $@ $(CLI_OBJ)
 
 test-protocol:
 	@tests/protocol_golden.sh
@@ -38,4 +39,4 @@ test-protocol:
 clean:
 	rm -f $(OBJ) $(CLI_OBJ) lnmgr lnmgrd
 
-.PHONY: clean
+.PHONY: all clean test-protocol
