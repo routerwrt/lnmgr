@@ -12,6 +12,25 @@
 
 static struct subscriber *subscribers = NULL;
 
+static void json_emit_signals(int fd, struct node *n)
+{
+    dprintf(fd, ", \"signals\": {");
+
+    bool first = true;
+    for (struct signal *s = n->signals; s; s = s->next) {
+        if (!first)
+            dprintf(fd, ", ");
+        first = false;
+
+        dprintf(fd,
+            "\"%s\": %s",
+            s->name,
+            s->value ? "true" : "false");
+    }
+
+    dprintf(fd, "}");
+}
+
 static struct lnmgr_explain *
 subscriber_last(struct subscriber *s, struct node *n)
 {
@@ -32,6 +51,7 @@ subscriber_last(struct subscriber *s, struct node *n)
 }
 
 static void socket_send_event(int fd,
+                              struct graph *g,
                               const char *id,
                               const struct lnmgr_explain *ex)
 {
@@ -39,12 +59,19 @@ static void socket_send_event(int fd,
     const char *code  = lnmgr_code_to_str(ex->code);
 
     dprintf(fd,
-        "{ \"type\": \"event\", \"id\": \"%s\", \"state\": \"%s\"%s%s }\n",
-        id,
-        state,
-        code ? ", \"code\": \"" : "",
-        code ? code : ""
-    );
+        "{ \"type\": \"event\", \"id\": \"%s\", \"state\": \"%s\"",
+        id, state);
+
+    if (code)
+        dprintf(fd, ", \"code\": \"%s\"", code);
+
+    struct node *n = graph_find_node(g, id);
+    if (n)
+        json_emit_signals(fd, n);
+    else
+        dprintf(fd, ", \"signals\": {}");
+
+    dprintf(fd, " }\n");
 }
 
 static void notify_subscribers(struct graph *g, bool admin_up)
@@ -62,7 +89,7 @@ static void notify_subscribers(struct graph *g, bool admin_up)
             if (lnmgr_explain_equal(prev, &now))
                 continue;
 
-            socket_send_event(s->fd, n->id, &now);
+            socket_send_event(s->fd, g, n->id, &now);
             *prev = now;
         }
     }
@@ -73,7 +100,7 @@ void socket_notify_subscribers(struct graph *g, bool admin_up)
     notify_subscribers(g, admin_up);
 }
 
-static void send_snapshot(int fd, struct subscriber *s)
+static void send_snapshot(int fd, struct subscriber *s, struct graph *g)
 {
     dprintf(fd, "{ \"type\": \"snapshot\", \"nodes\": [");
 
@@ -91,6 +118,12 @@ static void send_snapshot(int fd, struct subscriber *s)
         const char *code = lnmgr_code_to_str(ns->last.code);
         if (code)
             dprintf(fd, ", \"code\": \"%s\"", code);
+
+        struct node *n = graph_find_node(g, ns->id);
+        if (n)
+            json_emit_signals(fd, n);
+        else
+            dprintf(fd, ", \"signals\": {}");
 
         dprintf(fd, " }");
     }
@@ -131,7 +164,7 @@ static void add_subscriber(int fd, struct graph *g)
 
     s->fd = fd;
     subscriber_init_states(s, g);
-    send_snapshot(fd, s);
+    send_snapshot(fd, s, g);
 
     s->next = subscribers;
     subscribers = s;
