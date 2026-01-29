@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <linux/if.h>
@@ -55,6 +56,26 @@ static int request_getlink(int fd)
 }
 
 /* ------------------------------------------------------------ */
+/* common link → signal translation                             */
+
+static bool apply_link_state(struct graph *g,
+                             const char *ifname,
+                             unsigned int flags)
+{
+    bool changed = false;
+
+    bool carrier  = !!(flags & IFF_LOWER_UP);
+    bool admin_up = !!(flags & IFF_UP);
+    bool running  = !!(flags & IFF_RUNNING);
+
+    changed |= graph_set_signal(g, ifname, "carrier",  carrier);
+    changed |= graph_set_signal(g, ifname, "admin_up", admin_up);
+    changed |= graph_set_signal(g, ifname, "running",  running);
+
+    return changed;
+}
+
+/* ------------------------------------------------------------ */
 
 int signal_netlink_fd(void)
 {
@@ -65,6 +86,7 @@ int signal_netlink_fd(void)
     return nl_fd;
 }
 
+/* initial RTM_GETLINK dump */
 int signal_netlink_sync(struct graph *g)
 {
     if (request_getlink(nl_fd) < 0)
@@ -72,10 +94,12 @@ int signal_netlink_sync(struct graph *g)
 
     for (;;) {
         char buf[4096];
+
         struct iovec iov = {
             .iov_base = buf,
             .iov_len  = sizeof(buf),
         };
+
         struct sockaddr_nl sa;
         struct msghdr msg = {
             .msg_name    = &sa,
@@ -102,6 +126,7 @@ int signal_netlink_sync(struct graph *g)
             int attrlen = nh->nlmsg_len - NLMSG_LENGTH(sizeof(*ifi));
 
             const char *ifname = NULL;
+
             for (struct rtattr *rta = IFLA_RTA(ifi);
                  RTA_OK(rta, attrlen);
                  rta = RTA_NEXT(rta, attrlen)) {
@@ -115,8 +140,7 @@ int signal_netlink_sync(struct graph *g)
             if (!ifname)
                 continue;
 
-            bool carrier = !!(ifi->ifi_flags & IFF_LOWER_UP);
-            graph_set_signal(g, ifname, "carrier", carrier);
+            apply_link_state(g, ifname, ifi->ifi_flags);
         }
     }
 }
@@ -144,15 +168,16 @@ bool signal_netlink_handle(struct graph *g)
     ssize_t len = recvmsg(nl_fd, &msg, 0);
     if (len < 0) {
         if (errno == EINTR)
-            return changed;
-        return changed;
+            return false;
+        return false;
     }
 
     for (struct nlmsghdr *nh = (struct nlmsghdr *)buf;
          NLMSG_OK(nh, len);
          nh = NLMSG_NEXT(nh, len)) {
 
-        if (nh->nlmsg_type != RTM_NEWLINK)
+        if (nh->nlmsg_type != RTM_NEWLINK &&
+            nh->nlmsg_type != RTM_DELLINK)
             continue;
 
         struct ifinfomsg *ifi = NLMSG_DATA(nh);
@@ -173,8 +198,16 @@ bool signal_netlink_handle(struct graph *g)
         if (!ifname)
             continue;
 
-        bool carrier = !!(ifi->ifi_flags & IFF_LOWER_UP);
-        changed |= graph_set_signal(g, ifname, "carrier", carrier);
+        if (nh->nlmsg_type == RTM_DELLINK) {
+            /* interface removed → clear signals */
+            changed |= graph_set_signal(g, ifname, "carrier",  false);
+            changed |= graph_set_signal(g, ifname, "admin_up", false);
+            changed |= graph_set_signal(g, ifname, "running",  false);
+            continue;
+        }
+
+        /* RTM_NEWLINK */
+        changed |= apply_link_state(g, ifname, ifi->ifi_flags);
     }
 
     return changed;
