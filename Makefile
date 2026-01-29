@@ -1,9 +1,21 @@
 CC ?= cc
 
-BASE_CFLAGS := -Wall -Wextra
+BASE_CFLAGS := \
+  -Wall -Wextra \
+  -Wformat -Wformat-security \
+  -Wshadow \
+  -Wpointer-arith \
+  -Wstrict-prototypes \
+  -Wmissing-prototypes \
+  -Werror=implicit-function-declaration
+
+# POSIX.1-2008 for fcntl, sigaction, pipe, poll; portable across glibc/musl
+BASE_CPPFLAGS := \
+  -Isrc \
+  -D_POSIX_C_SOURCE=200809L
 
 CFLAGS   += $(BASE_CFLAGS)
-CPPFLAGS += -Isrc
+CPPFLAGS += $(BASE_CPPFLAGS)
 
 DAEMON_CFLAGS = $(CFLAGS) -DLNMGR_DEBUG
 CLI_CFLAGS    = $(CFLAGS)

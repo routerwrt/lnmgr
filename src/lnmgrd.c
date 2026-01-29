@@ -38,6 +38,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <poll.h>
+#include <fcntl.h>
 
 
 /* sockets */
@@ -56,6 +57,7 @@
 
 #define LNMGR_SOCKET_PATH "/run/lnmgr.sock"
 
+static int sigpipe[2] = { -1, -1 };
 /*
  * Minimal lnmgr v0
  *
@@ -70,22 +72,38 @@ int signals_handle_netlink(struct graph *g, int nl_fd);
 
 static volatile sig_atomic_t running = 1;
 
-static void on_sigint(int sig)
+static void on_sigint(int signo)
 {
-    (void)sig;
-    running = 0;
+    (void)signo;
+    running = false;
+
+    if (sigpipe[1] >= 0) {
+        /* wake poll */
+        ssize_t r = write(sigpipe[1], "x", 1);
+        (void)r;
+    }
 }
 
 static void setup_signals(void)
 {
-    struct sigaction sa;
+    if (pipe(sigpipe) < 0) {
+        perror("pipe");
+        exit(1);
+    }
 
+    if (fcntl(sigpipe[0], F_SETFL, O_NONBLOCK) < 0)
+        perror("fcntl(sigpipe[0])");
+
+    if (fcntl(sigpipe[1], F_SETFL, O_NONBLOCK) < 0)
+        perror("fcntl(sigpipe[1])");
+
+    struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = on_sigint;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;   /* NO SA_RESTART */
 
-    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 }
 
@@ -97,8 +115,6 @@ int main(int argc, char **argv)
     }
 
     setup_signals();
-    signal(SIGINT, on_sigint);
-    signal(SIGTERM, on_sigint);
 
     struct graph *g = graph_create();
     if (!g) {
@@ -134,8 +150,14 @@ int main(int argc, char **argv)
     /* ---------- main event loop ---------- */
 
     while (running) {
-        struct pollfd pfds[3];
+        struct pollfd pfds[4];
         nfds_t nfds = 0;
+
+        /* signal pipe must be handled first to guarantee clean shutdown */
+        pfds[nfds++] = (struct pollfd){
+            .fd     = sigpipe[0],
+            .events = POLLIN | POLLERR | POLLHUP,
+        };
 
         pfds[nfds++] = (struct pollfd){
             .fd     = nl_fd,
@@ -164,6 +186,14 @@ int main(int argc, char **argv)
 
         bool changed = false;
         nfds_t i = 0;
+
+        if (pfds[i].revents & (POLLIN | POLLERR | POLLHUP)) {
+            char buf[32];
+            while (read(sigpipe[0], buf, sizeof(buf)) > 0);
+
+            break;
+        }
+        i++;
 
         /* ---------- netlink carrier ---------- */
         if (pfds[i].revents & POLLIN)
@@ -199,8 +229,9 @@ int main(int argc, char **argv)
 
         /* ---------- evaluate + notify ONCE ---------- */
         if (changed) {
-            if (graph_evaluate(g))
-                socket_notify_subscribers(g, /* admin_up */ true);
+            bool state_changed = graph_evaluate(g);
+            (void)state_changed; /* silences the warning for now */
+            socket_notify_subscribers(g, /* admin_up */ true);
         }
     }
     

@@ -18,6 +18,8 @@
 /* Returns netlink fd, opening and syncing on first call */
 int  signal_netlink_fd(void);
 
+int signal_netlink_sync(struct graph *g);
+
 /* Handle one readable netlink event */
 bool signal_netlink_handle(struct graph *g);
 

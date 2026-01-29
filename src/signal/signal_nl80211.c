@@ -155,7 +155,7 @@ bool signal_nl80211_handle(struct graph *g)
         struct genlmsghdr *genl = NLMSG_DATA(nlh);
 
         /* --- extract ifname --- */
-        char ifname[IFNAMSIZ];
+        char ifname[IF_NAMESIZE];
         bool have_ifname = false;
 
         struct nlattr *na =
