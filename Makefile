@@ -1,10 +1,13 @@
 CC ?= cc
 
 BASE_CFLAGS := -Wall -Wextra
-CFLAGS += $(BASE_CFLAGS) -Isrc
+
+CFLAGS   += $(BASE_CFLAGS)
+CPPFLAGS += -Isrc
 
 DAEMON_CFLAGS = $(CFLAGS) -DLNMGR_DEBUG
 CLI_CFLAGS    = $(CFLAGS)
+
 
 all: lnmgrd lnmgr
 
