@@ -137,12 +137,22 @@ int main(int argc, char **argv)
         struct pollfd pfds[3];
         nfds_t nfds = 0;
 
-        pfds[nfds++] = (struct pollfd){ .fd = nl_fd, .events = POLLIN };
+        pfds[nfds++] = (struct pollfd){
+            .fd     = nl_fd,
+            .events = POLLIN | POLLERR | POLLHUP,
+        };
 
-        if (wifi_fd >= 0)
-            pfds[nfds++] = (struct pollfd){ .fd = wifi_fd, .events = POLLIN };
+        if (wifi_fd >= 0) {
+            pfds[nfds++] = (struct pollfd){
+                .fd     = wifi_fd,
+                .events = POLLIN | POLLERR | POLLHUP,
+            };
+        }
 
-        pfds[nfds++] = (struct pollfd){ .fd = ctl_fd, .events = POLLIN };
+        pfds[nfds++] = (struct pollfd){
+            .fd     = ctl_fd,
+            .events = POLLIN,
+        };
 
         int rc = poll(pfds, nfds, -1);
         if (rc < 0) {
@@ -155,31 +165,59 @@ int main(int argc, char **argv)
         bool changed = false;
         nfds_t i = 0;
 
-        /* --- netlink carrier --- */
-        if (pfds[i++].revents & POLLIN)
+        /* ---------- netlink carrier ---------- */
+        if (pfds[i].revents & (POLLERR | POLLHUP)) {
+            /* future: reopen netlink */
+            i++;
+        } else if (pfds[i].revents & POLLIN) {
             changed |= signal_netlink_handle(g);
-
-        /* --- nl80211 wifi --- */
-        if (wifi_fd >= 0) {
-            if (pfds[i++].revents & POLLIN)
-                changed |= signal_nl80211_handle(g);
+            i++;
+        } else {
+            i++;
         }
 
-        /* --- evaluate ONCE --- */
+        /* ---------- nl80211 wifi ---------- */
+        if (wifi_fd >= 0) {
+            if (pfds[i].revents & (POLLERR | POLLHUP)) {
+                /* future: reopen nl80211 */
+                i++;
+            } else if (pfds[i].revents & POLLIN) {
+                changed |= signal_nl80211_handle(g);
+                i++;
+            } else {
+                i++;
+            }
+        }
+
+        /* ---------- evaluate ONCE ---------- */
         if (changed) {
             if (graph_evaluate(g))
                 socket_notify_subscribers(g, /* admin_up = */ true);
         }
 
-        /* --- control socket --- */
+        /* ---------- control socket ---------- */
         if (pfds[i].revents & POLLIN) {
-            int cfd = accept(ctl_fd, NULL, NULL);
-            if (cfd >= 0) {
-                int r = socket_handle_client(cfd, g);
-                if (r == 0)
-                    close(cfd);
-            } else if (errno != EAGAIN && errno != EINTR) {
+            for (;;) {
+                int cfd = accept(ctl_fd, NULL, NULL);
+                if (cfd >= 0) {
+                    bool local_changed = false;
+
+                    int r = socket_handle_client(cfd, g, &local_changed);
+                    if (local_changed) {
+                        if (graph_evaluate(g))
+                            socket_notify_subscribers(g, /* admin_up = */ true);
+                    }
+
+                    if (r == 0)
+                        close(cfd);
+                    continue;
+                }
+
+                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
+                    break;
+
                 perror("accept");
+                break;
             }
         }
     }
