@@ -58,6 +58,17 @@ static int request_getlink(int fd)
 /* ------------------------------------------------------------ */
 /* common link → signal translation                             */
 
+static bool clear_link_state(struct graph *g, const char *ifname)
+{
+    bool changed = false;
+
+    changed |= graph_set_signal(g, ifname, "carrier",  false);
+    changed |= graph_set_signal(g, ifname, "admin_up", false);
+    changed |= graph_set_signal(g, ifname, "running",  false);
+
+    return changed;
+}
+
 static bool apply_link_state(struct graph *g,
                              const char *ifname,
                              unsigned int flags)
@@ -199,10 +210,7 @@ bool signal_netlink_handle(struct graph *g)
             continue;
 
         if (nh->nlmsg_type == RTM_DELLINK) {
-            /* interface removed → clear signals */
-            changed |= graph_set_signal(g, ifname, "carrier",  false);
-            changed |= graph_set_signal(g, ifname, "admin_up", false);
-            changed |= graph_set_signal(g, ifname, "running",  false);
+            changed |= clear_link_state(g, ifname);
             continue;
         }
 
