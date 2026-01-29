@@ -1,8 +1,7 @@
 CC ?= cc
 
-CFLAGS ?=
-CFLAGS += -Wall -Wextra
-CFLAGS += -Isrc
+BASE_CFLAGS := -Wall -Wextra
+CFLAGS += $(BASE_CFLAGS) -Isrc
 
 DAEMON_CFLAGS = $(CFLAGS) -DLNMGR_DEBUG
 CLI_CFLAGS    = $(CFLAGS)
