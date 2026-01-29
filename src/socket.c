@@ -14,6 +14,9 @@ static struct subscriber *subscribers = NULL;
 
 static void json_emit_signals(int fd, struct node *n)
 {
+    if (!n->signals)
+        return;
+
     dprintf(fd, ", \"signals\": {");
 
     bool first = true;
@@ -122,9 +125,7 @@ static void send_snapshot(int fd, struct subscriber *s, struct graph *g)
         struct node *n = graph_find_node(g, ns->id);
         if (n)
             json_emit_signals(fd, n);
-        else
-            dprintf(fd, ", \"signals\": {}");
-
+  
         dprintf(fd, " }");
     }
 
