@@ -3,13 +3,13 @@
   "nodes": [
     {
       "id": "lo",
-      "type": "device",
+      "type": "loopback",
       "enabled": true,
       "auto": true
     },
     {
       "id": "eth0",
-      "type": "device",
+      "type": "ethernet",
       "enabled": true,
       "signals": ["carrier"]
     }

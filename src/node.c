@@ -5,6 +5,7 @@
 static const struct node_kind_desc kind_table[] = {
     /* LINK */
     { KIND_LINK_GENERIC,   NODE_LINK,        "link",       0 },
+    { KIND_LINK_LOOPBACK,  NODE_LINK,        "loopback",   0 },
     { KIND_LINK_ETHERNET,  NODE_LINK,        "ethernet",   0 },
     { KIND_LINK_WIFI,      NODE_LINK,        "wifi",       0 },
     { KIND_LINK_DSA_PORT,  NODE_LINK,        "dsa-port",   NKF_PRODUCES_L2 },
