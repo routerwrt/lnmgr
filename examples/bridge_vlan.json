@@ -1,0 +1,28 @@
+{
+  "nodes": [
+    {
+      "id": "br-lan",
+      "type": "device",
+      "kind": "bridge",
+      "vlans": [100, 200]
+    },
+    {
+      "id": "lan1",
+      "type": "device",
+      "bridge": "br-lan",
+      "bridge_vlans": [
+        { "vid": 100, "tagged": false, "pvid": true },
+        { "vid": 200, "tagged": true }
+      ]
+    },
+    {
+      "id": "lan2",
+      "type": "device",
+      "bridge": "br-lan",
+      "bridge_vlans": [
+        { "vid": 100, "tagged": true },
+        { "vid": 200, "tagged": true }
+      ]
+    }
+  ]
+}

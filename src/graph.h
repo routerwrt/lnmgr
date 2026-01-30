@@ -18,10 +18,10 @@ typedef enum {
  * Node types (semantic, not kernel types)
  */
 typedef enum {
-    NODE_DEVICE = 0,
-    NODE_BRIDGE,
-    NODE_TRANSFORMER,
-    NODE_SERVICE
+    NODE_LINK = 0,          /* physical / virtual link endpoint */
+    NODE_L2_AGGREGATE,      /* bridge, bond, lag, vlan domain */
+    NODE_L3_NETWORK,        /* IP network / routing domain */
+    NODE_SERVICE            /* consumers / producers of connectivity */
 } node_type_t;
 
 typedef enum {
@@ -89,6 +89,13 @@ struct require {
     struct require *next;
 };
 
+struct l2_vlan {
+    uint16_t vid;
+    bool     tagged;
+    bool     pvid;
+    struct l2_vlan *next;
+};
+
 /*
  * Graph node
  */
@@ -120,6 +127,8 @@ struct node {
     struct node         *master;
     struct node         *slaves;
     struct node         *slave_next;
+
+    struct l2_vlan *vlans;    /* per-port or per-bridge VLANs */
 
     struct node         *next;
 };
