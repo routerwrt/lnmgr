@@ -1,4 +1,5 @@
 #include "lnmgr_status.h"
+#include "graph.h"
 
 /*
  * Map graph explain + admin intent to user-visible status.
@@ -10,8 +11,8 @@
  * - any explain != NONE => WAITING
  * - NONE => UP
  */
-struct lnmgr_explain lnmgr_status_from_graph(const struct explain *gex,
-                                            bool admin_up)
+static struct lnmgr_explain
+lnmgr_status_from_graph(const struct explain *gex, bool admin_up)
 {
     struct lnmgr_explain out = {
         .status = LNMGR_STATUS_UNKNOWN,
@@ -48,15 +49,10 @@ struct lnmgr_explain lnmgr_status_from_graph(const struct explain *gex,
     return out;
 }
 
-struct lnmgr_explain current_status(struct graph *g,
-                            struct node *n, bool admin_up)
-{
-    struct explain gex = graph_explain_node(g, n->id);
-    return lnmgr_status_from_graph(&gex, admin_up);
-}
-
-struct lnmgr_explain lnmgr_status_for_node(struct graph *g,
-                            struct node *n, bool admin_up)
+struct lnmgr_explain
+lnmgr_status_for_node(struct graph *g,
+                      struct node *n,
+                      bool admin_up)
 {
     struct explain ex = graph_explain_node(g, n->id);
     return lnmgr_status_from_graph(&ex, admin_up);
@@ -68,8 +64,5 @@ bool lnmgr_explain_equal(const struct lnmgr_explain *a,
     if (!a || !b)
         return false;
 
-    if (a->status != b->status)
-        return false;
-
-    return a->code == b->code;
+    return a->status == b->status && a->code == b->code;
 }

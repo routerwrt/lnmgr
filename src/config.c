@@ -93,40 +93,20 @@ static int tok_skip(const jsmntok_t *toks, int i)
     }
 }
 
-static int parse_type(const char *s, node_type_t *out)
+static int parse_kind(const char *s,
+                      node_kind_t *kind,
+                      node_type_t *type)
 {
-    if (strcmp(s, "device") == 0) {
-        *out = NODE_DEVICE;
-        return 0;
-    }
-    if (strcmp(s, "bridge") == 0) {
-        *out = NODE_BRIDGE;
-        return 0;
-    }
-    if (strcmp(s, "transformer") == 0) {
-        *out = NODE_TRANSFORMER;
-        return 0;
-    }
-    if (strcmp(s, "service") == 0) {
-        *out = NODE_SERVICE;
-        return 0;
-    }
+    const struct node_kind_desc *d;
 
-    return -1;
+    d = node_kind_lookup_name(s);
+    if (!d)
+        return -1;
+
+    *kind = d->kind;
+    *type = d->type;
+    return 0;
 }
-
-struct node_tmp {
-    char *id;
-    node_type_t type;
-    int have_type;
-    int enabled;
-    int auto_up;
-    char **signals;
-    int signals_n;
-    char **requires;
-    int requires_n;
-    struct node *gn;
-};
 
 static void node_tmp_free(struct node_tmp *n)
 {
@@ -218,22 +198,28 @@ static int parse_node_object(const char *js, const jsmntok_t *toks, int *i,
             continue;
         }
 
-        if (jsoneq(js, k, "type") == 0) {
+         if (jsoneq(js, k, "type") == 0) {
             if (v->type != JSMN_STRING) {
                 node_tmp_free(&n);
                 return -1;
             }
+
             char *ts = tok_strdup(js, v);
             if (!ts) {
                 node_tmp_free(&n);
                 return -1;
             }
-            int rc = parse_type(ts, &n.type);
+
+            int rc = parse_kind(ts, &n.kind, &n.type);
             free(ts);
+
             if (rc < 0) {
                 node_tmp_free(&n);
                 return -1;
             }
+
+            n.have_kind = 1;
+
             idx = tok_skip(toks, idx);
             continue;
         }
@@ -434,7 +420,7 @@ int config_load_file(struct graph *g, const char *path)
 
     /* Apply in 3 phases so requires can refer to nodes defined later in file */
     for (int i = 0; i < nodes_n; i++) {
-        struct node *gn = graph_add_node(g, nodes[i].id, nodes[i].type);
+        struct node *gn = graph_add_node(g, nodes[i].id, nodes[i].kind);
         if (!gn)
             goto fail;
 

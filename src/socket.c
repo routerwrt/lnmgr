@@ -8,6 +8,8 @@
 #include <sys/stat.h>
 
 #include "socket.h"
+#include "enum_str.h"
+#include "actions.h"
 #include "graph.h"
 
 static struct subscriber *subscribers = NULL;
@@ -188,11 +190,14 @@ static void send_snapshot(int fd, struct subscriber *s, struct graph *g)
             ns->id,
             lnmgr_status_to_str(ns->last.status));
 
-        /* node type */
+        /* node type (human-visible kind) */
         if (n) {
-            dprintf(fd,
-                ", \"type\": \"%s\"",
-                node_type_to_str(n->type));
+            const struct node_kind_desc *kd = node_kind_lookup(n->kind);
+            if (kd) {
+                dprintf(fd,
+                    ", \"type\": \"%s\"",
+                    kd->name);
+            }
         }
 
         /* optional code */
@@ -220,9 +225,7 @@ static void subscriber_init_states(struct subscriber *s, struct graph *g)
             continue;
 
         ns->id = strdup(n->id);
-
-        struct explain gex = graph_explain_node(g, n->id);
-        ns->last = lnmgr_status_from_graph(&gex, true /* admin_up placeholder */);
+        ns->last = lnmgr_status_for_node(g, n, true /* admin_up placeholder */);
 
         if (!tail)
             s->states = ns;
@@ -330,16 +333,18 @@ static void reply_status_all(int fd, struct graph *g)
             dprintf(fd, ",");
         first = false;
 
-        struct explain gex = graph_explain_node(g, n->id);
-        struct lnmgr_explain lex = lnmgr_status_from_graph(&gex, true);
+        struct lnmgr_explain lex =
+            lnmgr_status_for_node(g, n, true /* admin_up placeholder */);
 
         const char *code = lnmgr_code_to_str(lex.code);
 
-        dprintf(fd, "{ \"id\": \"%s\", \"state\": \"%s\"%s%s }",
+        dprintf(fd,
+            "{ \"id\": \"%s\", \"state\": \"%s\"%s%s }",
             n->id,
             lnmgr_status_to_str(lex.status),
             code ? ", \"code\": \"" : "",
-            code ? code : "");
+            code ? code : ""
+        );
 
         n = n->next;
     }
@@ -359,13 +364,15 @@ static void reply_dump(int fd, struct graph *g)
             dprintf(fd, ",");
         first = false;
 
+        const struct node_kind_desc *kd = node_kind_lookup(n->kind);
+
         dprintf(fd,
             "{ \"id\": \"%s\", "
             "\"type\": \"%s\", "
             "\"enabled\": %s, "
             "\"auto\": %s",
             n->id,
-            node_type_to_str(n->type),
+            kd ? kd->name : "unknown",
             n->enabled ? "true" : "false",
             n->auto_up ? "true" : "false");
 

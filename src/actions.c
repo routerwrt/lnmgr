@@ -8,6 +8,7 @@
 #include <linux/if.h>
 
 #include "graph.h"
+#include "actions.h"
 
 static int rtnl_set_link_updown(const char *ifname, bool up)
 {
@@ -72,6 +73,11 @@ static void device_deactivate(struct node *n)
     rtnl_set_link_updown(n->id, false);
 }
 
+static const struct action_ops device_ops = {
+    .activate = device_activate,
+    .deactivate = device_deactivate,
+};
+
 /* ---- BRIDGE ---- */
 
 static action_result_t bridge_activate(struct node *n)
@@ -85,23 +91,43 @@ static void bridge_deactivate(struct node *n)
     (void)n;
 }
 
-static const struct action_ops device_ops = {
-    .activate = device_activate,
-    .deactivate = device_deactivate,
-};
-
 static const struct action_ops bridge_ops = {
     .activate = bridge_activate,
     .deactivate = bridge_deactivate,
 };
 
-const struct action_ops *action_ops_for_type(node_type_t type)
+/* ---- BOND ---- */
+
+static action_result_t bond_activate(struct node *n)
 {
-    switch (type) {
-    case NODE_DEVICE:
+    (void)n;
+    return ACTION_OK;
+}
+
+static void bond_deactivate(struct node *n)
+{
+    (void)n;
+}
+
+static const struct action_ops bond_ops = {
+    .activate = bond_activate,
+    .deactivate = bond_deactivate,
+};
+
+const struct action_ops *action_ops_for_kind(node_kind_t kind)
+{
+    switch (kind) {
+    case KIND_LINK_ETHERNET:
+    case KIND_LINK_WIFI:
+    case KIND_LINK_DSA_PORT:
         return &device_ops;
-    case NODE_BRIDGE:
+
+    case KIND_L2_BRIDGE:
         return &bridge_ops;
+
+    case KIND_L2_BOND:
+        return &bond_ops;
+
     default:
         return NULL;
     }

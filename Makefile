@@ -25,6 +25,7 @@ all: lnmgrd lnmgr
 
 SRC = \
     src/lnmgrd.c \
+    src/node.c \
     src/graph.c \
     src/actions.c \
     src/lnmgr_status.c \
@@ -32,7 +33,6 @@ SRC = \
     src/socket.c \
     src/json/jsmn_impl.c \
     src/enum_str.c \
-    src/protocol.c \
     src/signal/signal_netlink.c \
     src/signal/signal_nl80211.c
 

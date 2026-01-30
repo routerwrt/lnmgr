@@ -1,9 +1,10 @@
-#include "graph.h"
-
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
+#include "graph.h"
+#include "actions.h"
+#include "enum_str.h"
 /*
  * Internal helpers
  */
@@ -36,21 +37,35 @@ static struct signal *find_signal(struct node *n, const char *name)
     return NULL;
 }
 
-static struct node *node_create(const char *id, node_type_t type)
+static struct node *node_create(const char *id, node_kind_t kind)
 {
-    struct node *n = calloc(1, sizeof(*n));
+    const struct node_kind_desc *kd;
+    struct node *n;
+
+    kd = node_kind_lookup(kind);
+    if (!kd)
+        return NULL;
+
+    n = calloc(1, sizeof(*n));
     if (!n)
         return NULL;
 
-    n->id = strdup(id);
-    n->type = type;
-    n->enabled = false;
-    n->state   = NODE_INACTIVE;
+    n->id        = strdup(id);
+    n->kind      = kind;
+    n->type      = kd->type;
+
+    n->enabled   = false;
+    n->state     = NODE_INACTIVE;
     n->activated = false;
-    n->requires = NULL;
-    n->next = NULL;
     n->fail_reason = FAIL_NONE;
-    n->actions = (struct action_ops *)action_ops_for_type(type);
+
+    n->requires  = NULL;
+    n->master    = NULL;
+    n->slaves    = NULL;
+    n->slave_next = NULL;
+    n->vlans     = NULL;
+
+    n->actions = (struct action_ops *)action_ops_for_kind(kind);
 
     return n;
 }
@@ -111,12 +126,16 @@ struct node *graph_find_node(struct graph *g, const char *id)
 
 struct node *graph_add_node(struct graph *g,
                             const char *id,
-                            node_type_t type)
+                            node_kind_t kind)
 {
     if (graph_find_node(g, id))
         return NULL;
 
-    struct node *n = node_create(id, type);
+    const struct node_kind_desc *kd = node_kind_lookup(kind);
+    if (!kd)
+        return NULL;
+
+    struct node *n = node_create(id, kind);
     if (!n)
         return NULL;
 
@@ -463,17 +482,6 @@ static int node_cmp_id(const void *a, const void *b)
     return strcmp(na->id, nb->id);
 }
 
-static const char *node_type_str(node_type_t t)
-{
-    switch (t) {
-    case NODE_DEVICE:      return "device";
-    case NODE_BRIDGE:      return "bridge";
-    case NODE_TRANSFORMER: return "transformer";
-    case NODE_SERVICE:     return "service";
-    default:               return "unknown";
-    }
-}
-
 int graph_save_json(struct graph *g, int fd)
 {
     size_t count = 0;
@@ -504,7 +512,7 @@ int graph_save_json(struct graph *g, int fd)
             "{ \"id\": \"%s\", \"type\": \"%s\", "
             "\"enabled\": %s, \"auto\": %s",
             n->id,
-            node_type_str(n->type),
+            node_kind_to_str(n->kind),
             n->enabled ? "true" : "false",
             n->auto_up ? "true" : "false");
 

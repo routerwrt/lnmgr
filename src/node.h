@@ -3,20 +3,16 @@
 
 #include <stdbool.h>
 
-/* ------------------------------
- * Node semantic layer
- * ------------------------------ */
+/* ---------- semantic layer ---------- */
 
 typedef enum {
-    NODE_LINK = 0,          /* physical / virtual link endpoint */
-    NODE_L2_AGGREGATE,      /* bridge, bond, lag, vlan domain */
-    NODE_L3_NETWORK,        /* IP network / routing domain */
-    NODE_SERVICE            /* consumers / producers of connectivity */
+    NODE_LINK = 0,
+    NODE_L2_AGGREGATE,
+    NODE_L3_NETWORK,
+    NODE_SERVICE
 } node_type_t;
 
-/* ------------------------------
- * Concrete implementation kind
- * ------------------------------ */
+/* ---------- concrete kind ---------- */
 
 typedef enum {
     /* LINK */
@@ -55,39 +51,36 @@ typedef enum {
     KIND_MAX
 } node_kind_t;
 
-/* ------------------------------
- * Capability flags
- * ------------------------------ */
+/* ---------- capabilities ---------- */
 
-#define NKF_HAS_PORTS     (1U << 0)
-#define NKF_HAS_VLANS     (1U << 1)
-#define NKF_HAS_IP        (1U << 2)
-#define NKF_PRODUCES_L2   (1U << 3)
-#define NKF_PRODUCES_L3   (1U << 4)
+#define NKF_HAS_PORTS   (1U << 0)
+#define NKF_HAS_VLANS   (1U << 1)
+#define NKF_HAS_IP      (1U << 2)
+#define NKF_PRODUCES_L2 (1U << 3)
+#define NKF_PRODUCES_L3 (1U << 4)
 
-/* ------------------------------
- * Kind descriptor
- * ------------------------------ */
+/* ---------- descriptor ---------- */
 
 struct node_kind_desc {
     node_kind_t   kind;
     node_type_t   type;
-    const char   *name;     /* config / JSON name */
+    const char   *name;   /* config / JSON name */
     unsigned int  flags;
 };
 
-/*
- * Node lifecycle states
- */
+/* ---------- lifecycle ---------- */
+
 typedef enum {
-    NODE_INACTIVE = 0,  /* disabled by policy / manager */
-    NODE_WAITING,       /* enabled, waiting for requirements/signals */
-    NODE_ACTIVE,        /* operational */
-    NODE_FAILED         /* attempted activation failed */
+    NODE_INACTIVE = 0,
+    NODE_WAITING,
+    NODE_ACTIVE,
+    NODE_FAILED
 } node_state_t;
 
-/* Lookup helpers (implemented in enum_str.c or node.c) */
+/* ---------- lookup API ---------- */
+
 const struct node_kind_desc *node_kind_lookup(node_kind_t kind);
+
 const struct node_kind_desc *node_kind_lookup_name(const char *name);
 
 #endif /* LNMGR_NODE_H */

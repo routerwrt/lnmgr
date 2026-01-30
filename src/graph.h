@@ -38,11 +38,6 @@ typedef enum {
     ACTION_FAIL
 } action_result_t;
 
-/* String helpers (stable ABI) */
-const char *node_type_to_str(node_type_t t);
-const char *node_state_to_str(node_state_t s);
-const char *explain_type_to_str(explain_type_t e);
-
 struct explain {
     explain_type_t type;
     const char *detail; /* blocking node id OR signal name */
@@ -56,13 +51,6 @@ struct signal {
 
 struct node;
 
-struct action_ops {
-    action_result_t (*activate)(struct node *n);
-    void (*deactivate)(struct node *n);
-};
-
-const struct action_ops *action_ops_for_type(node_type_t type);
-
 /*
  * Dependency edge
  */
@@ -71,22 +59,14 @@ struct require {
     struct require *next;
 };
 
-struct l2_vlan {
-    uint16_t vid;
-    bool     tagged;
-    bool     pvid;
-    struct l2_vlan *next;
-};
-
 /*
  * Graph node
- */
-
-
- 
+ */ 
 struct node {
     char                *id;
-    node_type_t         type;
+    node_kind_t         kind;
+    node_type_t         type;   /* derived from kind */
+    int                 have_kind;
     bool                enabled;
     bool                auto_up;
 
@@ -129,7 +109,7 @@ void graph_destroy(struct graph *g);
 /* node management */
 struct node *graph_add_node(struct graph *g,
                             const char *id,
-                            node_type_t type);
+                            node_kind_t kind);
 
 int graph_del_node(struct graph *g, const char *id);
 
