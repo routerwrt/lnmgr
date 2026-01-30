@@ -4,25 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/*
- * Node lifecycle states
- */
-typedef enum {
-    NODE_INACTIVE = 0,  /* disabled by policy / manager */
-    NODE_WAITING,       /* enabled, waiting for requirements/signals */
-    NODE_ACTIVE,        /* operational */
-    NODE_FAILED         /* attempted activation failed */
-} node_state_t;
-
-/*
- * Node types (semantic, not kernel types)
- */
-typedef enum {
-    NODE_LINK = 0,          /* physical / virtual link endpoint */
-    NODE_L2_AGGREGATE,      /* bridge, bond, lag, vlan domain */
-    NODE_L3_NETWORK,        /* IP network / routing domain */
-    NODE_SERVICE            /* consumers / producers of connectivity */
-} node_type_t;
+#include "node.h"
 
 typedef enum {
     DFS_WHITE = 0,
