@@ -130,6 +130,12 @@ fail:
     return -1;
 }
 
+int signal_nl80211_sync(struct graph *g)
+{
+    (void)g;
+    return 0;
+}
+
 /* ------------------------------------------------------------ */
 /* event handler */
 

@@ -3,9 +3,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 
 #include "socket.h"
 #include "enum_str.h"
@@ -14,26 +16,76 @@
 
 static struct subscriber *subscribers = NULL;
 
-static void json_emit_signals(int fd, struct node *n)
+static bool write_all(int fd, const char *buf, size_t len)
+{
+    while (len > 0) {
+        ssize_t n = write(fd, buf, len);
+
+        if (n > 0) {
+            buf += n;
+            len -= n;
+            continue;
+        }
+
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return false;   /* slow subscriber */
+
+        return false;       /* fatal */
+    }
+
+    return true;
+}
+
+static bool fd_printf_nb(int fd, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int rc = vdprintf(fd, fmt, ap);
+    va_end(ap);
+
+    if (rc < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK ||
+            errno == EPIPE  || errno == ECONNRESET)
+            return false;
+    }
+
+    return true;
+}
+
+static bool json_emit_signals_nb(int fd, struct node *n)
 {
     if (!n->signals)
-        return;
+        return true;
 
-    dprintf(fd, ", \"signals\": {");
+    if (!write_all(fd, ", \"signals\": {", 14))
+        return false;
 
     bool first = true;
+
     for (struct signal *s = n->signals; s; s = s->next) {
-        if (!first)
-            dprintf(fd, ", ");
+        if (!first) {
+            if (!write_all(fd, ", ", 2))
+                return false;
+        }
         first = false;
 
-        dprintf(fd,
+        char buf[256];
+        int len = snprintf(buf, sizeof(buf),
             "\"%s\": %s",
             s->name,
             s->value ? "true" : "false");
+
+        if (len < 0 || len >= (int)sizeof(buf))
+            return false;
+
+        if (!write_all(fd, buf, len))
+            return false;
     }
 
-    dprintf(fd, "}");
+    if (!write_all(fd, "}", 1))
+        return false;
+
+    return true;
 }
 
 static struct node_state *
@@ -109,7 +161,7 @@ signals_changed(struct node_state *ns, struct node *n)
     return changed;
 }
 
-static void socket_send_event(int fd,
+static bool socket_send_event(int fd,
                               struct graph *g,
                               const char *id,
                               const struct lnmgr_explain *ex)
@@ -117,54 +169,86 @@ static void socket_send_event(int fd,
     const char *state = lnmgr_status_to_str(ex->status);
     const char *code  = lnmgr_code_to_str(ex->code);
 
-    dprintf(fd,
+     if (!fd_printf_nb(fd,
         "{ \"type\": \"event\", \"id\": \"%s\", \"state\": \"%s\"",
-        id, state);
+        id, state))
+        return false;
 
-    if (code)
-        dprintf(fd, ", \"code\": \"%s\"", code);
-
+    if (code) {
+        if (!fd_printf_nb(fd, ", \"code\": \"%s\"", code))
+            return false;
+    }
+    
     struct node *n = graph_find_node(g, id);
-    if (n)
-        json_emit_signals(fd, n);
-    else
-        dprintf(fd, ", \"signals\": {}");
+    if (n) {
+        if (!json_emit_signals_nb(fd, n))
+            return false;
+    } else {
+        if (!fd_printf_nb(fd, ", \"signals\": {}"))
+            return false;
+    }
 
-    dprintf(fd, " }\n");
+    if (!fd_printf_nb(fd, " }\n"))
+        return false;
+
+    return true;
+}
+
+static void drop_subscriber(struct subscriber *prev, struct subscriber *s)
+{
+    if (prev)
+        prev->next = s->next;
+    else
+        subscribers = s->next;
+
+    close(s->fd);
+    free(s);
 }
 
 static void notify_subscribers(struct graph *g, bool admin_up)
 {
-    for (struct subscriber *s = subscribers; s; s = s->next) {
+    struct subscriber *s = subscribers;
+    struct subscriber *prev = NULL;
+
+    while (s) {
+        bool alive = true;
 
         for (struct node *n = g->nodes; n; n = n->next) {
-
             struct lnmgr_explain now =
                 lnmgr_status_for_node(g, n, admin_up);
 
-            struct node_state *ns =
-                subscriber_get_node(s, n->id);
+            struct node_state *ns = subscriber_get_node(s, n->id);
             if (!ns)
                 continue;
 
             bool changed = false;
 
-            /* ---- state / code diff ---- */
             if (ns->last.status != now.status ||
                 ns->last.code   != now.code) {
-
                 ns->last = now;
                 changed = true;
             }
 
-            /* ---- signal diff ---- */
             changed |= signals_changed(ns, n);
 
             if (!changed)
                 continue;
 
-            socket_send_event(s->fd, g, n->id, &now);
+            if (!socket_send_event(s->fd, g, n->id, &now)) {
+                alive = false;
+                break;   /* stop sending to this subscriber */
+            }
         }
+
+        if (!alive) {
+            struct subscriber *dead = s;
+            s = s->next;
+            drop_subscriber(prev, dead);
+            continue;
+        }
+
+        prev = s;
+        s = s->next;
     }
 }
 
@@ -173,46 +257,81 @@ void socket_notify_subscribers(struct graph *g, bool admin_up)
     notify_subscribers(g, admin_up);
 }
 
-static void send_snapshot(int fd, struct subscriber *s, struct graph *g)
+static bool send_snapshot(int fd, struct subscriber *s, struct graph *g)
 {
-    dprintf(fd, "{ \"type\": \"snapshot\", \"nodes\": [");
+    char buf[1024];
+    int len;
+
+    /* opening */
+    len = snprintf(buf, sizeof(buf),
+                   "{ \"type\": \"snapshot\", \"nodes\": [");
+    if (len < 0 || len >= (int)sizeof(buf))
+        return false;
+    if (!write_all(fd, buf, len))
+        return false;
 
     bool first = true;
+
     for (struct node_state *ns = s->states; ns; ns = ns->next) {
-        if (!first)
-            dprintf(fd, ",");
+        if (!first) {
+            if (!write_all(fd, ",", 1))
+                return false;
+        }
         first = false;
 
         struct node *n = graph_find_node(g, ns->id);
 
-        dprintf(fd,
+        len = snprintf(buf, sizeof(buf),
             "{ \"id\": \"%s\", \"state\": \"%s\"",
             ns->id,
             lnmgr_status_to_str(ns->last.status));
+
+        if (len < 0 || len >= (int)sizeof(buf))
+            return false;
+        if (!write_all(fd, buf, len))
+            return false;
 
         /* node type (human-visible kind) */
         if (n) {
             const struct node_kind_desc *kd = node_kind_lookup(n->kind);
             if (kd) {
-                dprintf(fd,
-                    ", \"type\": \"%s\"",
-                    kd->name);
+                len = snprintf(buf, sizeof(buf),
+                               ", \"type\": \"%s\"",
+                               kd->name);
+                if (len < 0 || len >= (int)sizeof(buf))
+                    return false;
+                if (!write_all(fd, buf, len))
+                    return false;
             }
         }
 
         /* optional code */
         const char *code = lnmgr_code_to_str(ns->last.code);
-        if (code)
-            dprintf(fd, ", \"code\": \"%s\"", code);
+        if (code) {
+            len = snprintf(buf, sizeof(buf),
+                           ", \"code\": \"%s\"",
+                           code);
+            if (len < 0 || len >= (int)sizeof(buf))
+                return false;
+            if (!write_all(fd, buf, len))
+                return false;
+        }
 
         /* signals */
-        if (n)
-            json_emit_signals(fd, n);
+        if (n) {
+            if (!json_emit_signals_nb(fd, n))
+                return false;
+        }
 
-        dprintf(fd, " }");
+        if (!write_all(fd, " }", 2))
+            return false;
     }
 
-    dprintf(fd, "] }\n");
+    /* closing */
+    if (!write_all(fd, "] }\n", 4))
+        return false;
+
+    return true;
 }
 
 static void subscriber_init_states(struct subscriber *s, struct graph *g)
@@ -236,31 +355,42 @@ static void subscriber_init_states(struct subscriber *s, struct graph *g)
     }
 }
 
+/*
+ * Subscribers are best-effort observers.
+ * They may be disconnected at any time.
+ * Reconnection + snapshot is the only recovery mechanism.
+ */
 static void add_subscriber(int fd, struct graph *g)
 {
     struct subscriber *s = calloc(1, sizeof(*s));
-    if (!s) {
-        /* DO NOT close(fd) */
+    if (!s)
         return;
-    }
+
+    /* make subscriber socket non-blocking */
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0)
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
     s->fd = fd;
     subscriber_init_states(s, g);
-    send_snapshot(fd, s, g);
+
+    /* IMPORTANT: snapshot must also tolerate EAGAIN */
+    if (!send_snapshot(fd, s, g)) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            /* snapshot incomplete – subscriber still valid */
+            s->next = subscribers;
+            subscribers = s;
+            return;
+        }
+
+        /* real error */
+        close(fd);
+        free(s);
+        return;
+    }
 
     s->next = subscribers;
     subscribers = s;
-}
-
-static void drop_subscriber(struct subscriber *prev, struct subscriber *s)
-{
-    if (prev)
-        prev->next = s->next;
-    else
-        subscribers = s->next;
-
-    close(s->fd);
-    free(s);
 }
 
 void socket_add_subscriber(struct graph *g, int fd)
@@ -311,26 +441,33 @@ static ssize_t read_line(int fd, char *buf, size_t max)
     return i;
 }
 
-static void reply_status_one(int fd, struct graph *g, const char *id)
+static bool reply_status_one(int fd, struct graph *g, const char *id)
 {
     struct explain e = graph_explain_node(g, id);
 
-    dprintf(fd,
-        "{ \"type\": \"status\", \"id\": \"%s\", "
+    if (!fd_printf_nb(fd, "{ \"type\": \"status\", \"id\": \"%s\", "
         "\"state\": %d, \"explain\": %d }\n",
-        id, e.type == EXPLAIN_NONE ? NODE_ACTIVE : NODE_WAITING, e.type);
+        id,
+        e.type == EXPLAIN_NONE ? NODE_ACTIVE : NODE_WAITING,
+        e.type))
+        return false;
+
+    return true;
 }
 
-static void reply_status_all(int fd, struct graph *g)
+static bool reply_status_all(int fd, struct graph *g)
 {
-    dprintf(fd, "{ \"type\": \"status\", \"nodes\": [");
-
+    if (!fd_printf_nb(fd, "{ \"type\": \"status\", \"nodes\": ["))
+        return false;
+ 
     struct node *n = g->nodes;
     bool first = true;
 
     while (n) {
-        if (!first)
-            dprintf(fd, ",");
+        if (!first) {
+           if (!fd_printf_nb(fd, ","))
+                return false;
+        } 
         first = false;
 
         struct lnmgr_explain lex =
@@ -338,35 +475,41 @@ static void reply_status_all(int fd, struct graph *g)
 
         const char *code = lnmgr_code_to_str(lex.code);
 
-        dprintf(fd,
+        if (!fd_printf_nb(fd,
             "{ \"id\": \"%s\", \"state\": \"%s\"%s%s }",
             n->id,
             lnmgr_status_to_str(lex.status),
             code ? ", \"code\": \"" : "",
-            code ? code : ""
-        );
-
+            code ? code : ""))
+            return false;
+ 
         n = n->next;
     }
 
-    dprintf(fd, "] }\n");
+    if (!fd_printf_nb(fd, "] }\n"))
+        return false;
+
+    return true;
 }
 
-static void reply_dump(int fd, struct graph *g)
+static bool reply_dump(int fd, struct graph *g)
 {
-    dprintf(fd, "{ \"type\": \"dump\", \"nodes\": [");
+    if (!fd_printf_nb(fd, "{ \"type\": \"dump\", \"nodes\": ["))
+        return false;
 
     struct node *n = g->nodes;
     bool first = true;
 
     while (n) {
         if (!first)
-            dprintf(fd, ",");
+            if (!fd_printf_nb(fd, ","))
+                return false;
+
         first = false;
 
         const struct node_kind_desc *kd = node_kind_lookup(n->kind);
 
-        dprintf(fd,
+        if (!fd_printf_nb(fd,
             "{ \"id\": \"%s\", "
             "\"type\": \"%s\", "
             "\"enabled\": %s, "
@@ -374,59 +517,79 @@ static void reply_dump(int fd, struct graph *g)
             n->id,
             kd ? kd->name : "unknown",
             n->enabled ? "true" : "false",
-            n->auto_up ? "true" : "false");
+            n->auto_up ? "true" : "false"))
+            return false;
 
         /* ---- requires[] ---- */
-        dprintf(fd, ", \"requires\": [");
+        if (!fd_printf_nb(fd, ", \"requires\": ["))
+            return false;
+
         bool rfirst = true;
         for (struct require *r = n->requires; r; r = r->next) {
             if (!rfirst)
-                dprintf(fd, ",");
+                if (!fd_printf_nb(fd, ","))
+                    return false;
+        
             rfirst = false;
 
-            dprintf(fd, "\"%s\"", r->node->id);
+            if (!fd_printf_nb(fd, "\"%s\"", r->node->id))
+                return false;
         }
-        dprintf(fd, "]");
+        if (!fd_printf_nb(fd, "]"))
+            return false;
 
         /* ---- actions (presence only) ---- */
-        dprintf(fd,
+        if (!fd_printf_nb(fd,
             ", \"actions\": { "
             "\"activate\": %s, "
             "\"deactivate\": %s }",
             (n->actions && n->actions->activate)   ? "true" : "false",
-            (n->actions && n->actions->deactivate) ? "true" : "false");
+            (n->actions && n->actions->deactivate) ? "true" : "false"))
+            return false;
 
-        dprintf(fd, " }");
+        if (!fd_printf_nb(fd, " }"))
+            return false;
 
         n = n->next;
     }
 
-    dprintf(fd, "] }\n");
+    if (!fd_printf_nb(fd, "] }\n"))
+        return false;
+    
+    return true;
 }
 
-static void reply_save(int fd, struct graph *g)
+static bool reply_save(int fd, struct graph *g)
 {
     graph_save_json(g, fd);
+
+    return true;
 }
 
-static void handle_signal_cmd(int fd, struct graph *g, char *args)
+static bool handle_signal_cmd(int fd, struct graph *g, char *args)
 {
     char node[64], sig[64];
     int val;
 
     if (sscanf(args, "%63s %63s %d", node, sig, &val) != 3) {
-        dprintf(fd, "{ \"error\": \"invalid syntax\" }\n");
-        return;
+        if (!fd_printf_nb(fd, "{ \"error\": \"invalid syntax\" }\n"))
+            return false;
+
+        return true;
     }
 
     if (val != 0 && val != 1) {
-        dprintf(fd, "{ \"error\": \"invalid value\" }\n");
-        return;
+        if (!fd_printf_nb(fd, "{ \"error\": \"invalid value\" }\n"))
+            return false;
+
+        return true;
     }
 
     if (!graph_find_node(g, node)) {
-        dprintf(fd, "{ \"error\": \"unknown node\" }\n");
-        return;
+        if (!fd_printf_nb(fd, "{ \"error\": \"unknown node\" }\n"))
+            return false;
+
+        return true;
     }
 
     bool changed = graph_set_signal(g, node, sig, val);
@@ -436,7 +599,7 @@ static void handle_signal_cmd(int fd, struct graph *g, char *args)
         socket_notify_subscribers(g, /* admin_up = */ true);
     }
 
-    dprintf(fd,
+    if (!fd_printf_nb(fd,
         "{ \"type\": \"signal\", "
         "\"node\": \"%s\", "
         "\"signal\": \"%s\", "
@@ -445,55 +608,68 @@ static void handle_signal_cmd(int fd, struct graph *g, char *args)
         node,
         sig,
         val ? "true" : "false",
-        changed ? "true" : "false");
+        changed ? "true" : "false"))
+        return false;
+    
+    return true;
 }
 
 int socket_handle_client(int fd, struct graph *g)
 {
     char line[256];
 
+    DPRINTF("socket_handle_client(fd=%d)\n", fd);
+
     for (;;) {
-        if (read_line(fd, line, sizeof(line)) <= 0)
-            return 0;   /* client closed */
+        ssize_t rc = read_line(fd, line, sizeof(line));
+        if (rc <= 0)
+            return SOCKET_CLOSE;
 
         if (strcmp(line, "HELLO") == 0) {
-            dprintf(fd,
+            if (!fd_printf_nb(fd,
                 "{ \"type\": \"hello\", \"version\": 1, "
-                "\"features\": [\"status\",\"dump\",\"save\",\"subscribe\"] }\n");
+                "\"features\": [\"status\",\"dump\",\"save\",\"subscribe\"] }\n"))
+                return SOCKET_ERROR;
             continue;
         }
 
         if (strcmp(line, "SUBSCRIBE") == 0) {
-            add_subscriber(fd, g);
-            return 1;   /* daemon must NOT close fd */
+            DPRINTF("SUBSCRIBE accepted fd=%d\n", fd);
+            socket_add_subscriber(g, fd);
+            return SOCKET_KEEP;   /* DO NOT CLOSE */
         }
 
         if (strcmp(line, "STATUS") == 0) {
-            reply_status_all(fd, g);
+            if (!reply_status_all(fd, g))
+                return SOCKET_ERROR;
             continue;
         }
 
         if (strncmp(line, "STATUS ", 7) == 0) {
-            reply_status_one(fd, g, line + 7);
+            if (!reply_status_one(fd, g, line + 7))
+                return SOCKET_ERROR;
             continue;
         }
 
         if (strcmp(line, "DUMP") == 0) {
-            reply_dump(fd, g);
+            if (!reply_dump(fd, g))
+                return SOCKET_ERROR;
             continue;
         }
 
         if (strcmp(line, "SAVE") == 0) {
             reply_save(fd, g);
-            continue;
+            return SOCKET_MUTATE;
         }
 
         if (strncmp(line, "SIGNAL ", 7) == 0) {
-            handle_signal_cmd(fd, g, line + 7);
-            continue;
+            if (!handle_signal_cmd(fd, g, line + 7))
+                return SOCKET_ERROR;
+            return SOCKET_MUTATE;
         }
 
-        dprintf(fd, "{ \"error\": \"unknown command\" }\n");
+        if (!fd_printf_nb(fd, "{ \"error\": \"unknown command\" }\n"))
+            return SOCKET_ERROR;
     }
 }
 

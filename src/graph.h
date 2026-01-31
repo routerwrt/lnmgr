@@ -6,6 +6,12 @@
 
 #include "node.h"
 
+#ifdef LNMGR_DEBUG
+#define DPRINTF(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
+#else
+#define DPRINTF(fmt, ...) do {} while (0)
+#endif
+
 typedef enum {
     DFS_WHITE = 0,
     DFS_GRAY,

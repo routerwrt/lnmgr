@@ -18,6 +18,7 @@
  */
 
 int  signal_nl80211_fd(void);
+int signal_nl80211_sync(struct graph *g);
 bool signal_nl80211_handle(struct graph *g);
 void signal_nl80211_close(void);
 

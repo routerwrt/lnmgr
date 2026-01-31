@@ -9,7 +9,7 @@ BASE_CFLAGS := \
   -Wmissing-prototypes \
   -Werror=implicit-function-declaration
 
-# POSIX.1-2008 for fcntl, sigaction, pipe, poll; portable across glibc/musl
+# POSIX.1-2008 for fcntl, sigaction, pipe, poll
 BASE_CPPFLAGS := \
   -Isrc \
   -D_POSIX_C_SOURCE=200809L
@@ -20,8 +20,11 @@ CPPFLAGS += $(BASE_CPPFLAGS)
 DAEMON_CFLAGS = $(CFLAGS) -DLNMGR_DEBUG
 CLI_CFLAGS    = $(CFLAGS)
 
-
 all: lnmgrd lnmgr
+
+# -----------------------------
+# Daemon
+# -----------------------------
 
 SRC = \
     src/lnmgrd.c \
@@ -36,21 +39,35 @@ SRC = \
     src/signal/signal_netlink.c \
     src/signal/signal_nl80211.c
 
-OBJ = $(SRC:.c=.o)
+DAEMON_OBJ = $(SRC:.c=.daemon.o)
 
-lnmgrd: $(OBJ)
-	$(CC) $(LDFLAGS) -o $@ $(OBJ)
+%.daemon.o: %.c
+	$(CC) $(CPPFLAGS) $(DAEMON_CFLAGS) -c -o $@ $<
+
+lnmgrd: $(DAEMON_OBJ)
+	$(CC) $(LDFLAGS) -o $@ $(DAEMON_OBJ)
+
+# -----------------------------
+# CLI
+# -----------------------------
 
 CLI_SRC = cli/lnmgr.c
-CLI_OBJ = $(CLI_SRC:.c=.o)
+CLI_OBJ = $(CLI_SRC:.c=.cli.o)
+
+%.cli.o: %.c
+	$(CC) $(CPPFLAGS) $(CLI_CFLAGS) -c -o $@ $<
 
 lnmgr: $(CLI_OBJ)
 	$(CC) $(LDFLAGS) -o $@ $(CLI_OBJ)
+
+# -----------------------------
+# Misc
+# -----------------------------
 
 test-protocol:
 	@tests/protocol_golden.sh
 
 clean:
-	rm -f $(OBJ) $(CLI_OBJ) lnmgr lnmgrd
+	rm -f $(DAEMON_OBJ) $(CLI_OBJ) lnmgr lnmgrd
 
 .PHONY: all clean test-protocol

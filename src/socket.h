@@ -5,6 +5,13 @@
 
 struct graph;
 
+enum socket_result {
+    SOCKET_ERROR = -1,
+    SOCKET_CLOSE = 0,
+    SOCKET_KEEP  = 1,
+    SOCKET_MUTATE = 2,
+};
+
 struct signal_state {
     char *name;
     bool value;

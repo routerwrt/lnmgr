@@ -50,28 +50,33 @@ static int send_command(int fd, const char *cmd)
     return 0;
 }
 
-static void read_and_print_reply(int fd)
-{
-    char buf[4096];
-    ssize_t r;
-
-    while ((r = read(fd, buf, sizeof(buf))) > 0) {
-        fwrite(buf, 1, r, stdout);
-    }
-}
-
-static void read_reply(int fd)
+static void read_and_print_stream(int fd)
 {
     char buf[4096];
     ssize_t n;
 
     while ((n = read(fd, buf, sizeof(buf))) > 0) {
         fwrite(buf, 1, n, stdout);
+
+        /* optional: flush for interactive use */
+        fflush(stdout);
+    }
+}
+
+/* Read exactly one newline-terminated protocol message */
+static void read_one_message(int fd, bool print)
+{
+    char buf[4096];
+    ssize_t n;
+
+    while ((n = read(fd, buf, sizeof(buf))) > 0) {
+        if (print)
+            fwrite(buf, 1, n, stdout);
+
         if (buf[n - 1] == '\n')
             break;
     }
 }
-
 
 static void usage(const char *argv0)
 {
@@ -87,6 +92,7 @@ static void usage(const char *argv0)
 int main(int argc, char **argv)
 {
     bool want_watch = false;
+    bool show_hello = false;
     char cmd[256];
 
     if (argc < 2) {
@@ -111,6 +117,7 @@ int main(int argc, char **argv)
             usage(argv[0]);
             return 1;
         }
+        show_hello = true;
         snprintf(cmd, sizeof(cmd), "DUMP");
 
     } else if (strcmp(argv[1], "save") == 0) {
@@ -150,10 +157,12 @@ int main(int argc, char **argv)
     }
 
     /* read HELLO reply */
-    read_reply(fd);
+    read_one_message(fd, show_hello);
 
     /* -------- send command -------- */
 
+    fprintf(stderr, "sending command: %s\n", cmd);
+    
     if (send_command(fd, cmd) < 0) {
         perror("lnmgr: send command");
         close(fd);
@@ -169,13 +178,13 @@ int main(int argc, char **argv)
          *  - then infinite event stream
          *  - only exits on error / EOF
          */
-        read_and_print_reply(fd);
+        read_and_print_stream(fd);
         close(fd);
         return 0;
     }
 
     /* one-shot commands */
-    read_reply(fd);
+    read_one_message(fd, true);
     close(fd);
     return 0;
 }

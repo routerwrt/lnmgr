@@ -32,6 +32,7 @@
 /* libc */
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <signal.h>
 #include <unistd.h>
 #include <errno.h>
@@ -105,6 +106,8 @@ static void setup_signals(void)
 
     sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+
+    signal(SIGPIPE, SIG_IGN);
 }
 
 int main(int argc, char **argv)
@@ -140,6 +143,10 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    /* establish initial facts */
+    signal_netlink_sync(g);
+    // signal_nl80211_sync(g); /* optional later */
+
     /* ---------- initial evaluation (AUTO + config) ---------- */
 
     graph_evaluate(g);
@@ -148,12 +155,10 @@ int main(int argc, char **argv)
     printf("lnmgrd: configuration loaded, running (Ctrl+C to exit)\n");
 
     /* ---------- main event loop ---------- */
-
     while (running) {
         struct pollfd pfds[4];
         nfds_t nfds = 0;
 
-        /* signal pipe must be handled first to guarantee clean shutdown */
         pfds[nfds++] = (struct pollfd){
             .fd     = sigpipe[0],
             .events = POLLIN | POLLERR | POLLHUP,
@@ -173,7 +178,7 @@ int main(int argc, char **argv)
 
         pfds[nfds++] = (struct pollfd){
             .fd     = ctl_fd,
-            .events = POLLIN,
+            .events = POLLIN | POLLERR | POLLHUP,
         };
 
         int rc = poll(pfds, nfds, -1);
@@ -185,56 +190,83 @@ int main(int argc, char **argv)
         }
 
         bool changed = false;
+        bool nl_activity = false;
         nfds_t i = 0;
 
+        /* ---------- signal pipe ---------- */
         if (pfds[i].revents & (POLLIN | POLLERR | POLLHUP)) {
             char buf[32];
-            while (read(sigpipe[0], buf, sizeof(buf)) > 0);
-
+            while (read(sigpipe[0], buf, sizeof(buf)) > 0) {
+                /* drain */
+            }
             break;
         }
         i++;
 
-        /* ---------- netlink carrier ---------- */
-        if (pfds[i].revents & POLLIN)
-            changed |= signal_netlink_handle(g);
+        /* ---------- rtnetlink ---------- */
+        if (pfds[i].revents & POLLIN) {
+            DPRINTF("poll nl_fd=%d\n", nl_fd);
+            if (pfds[i].revents & (POLLIN | POLLERR | POLLHUP)) {
+                nl_activity = signal_netlink_handle(g);
+                changed |= nl_activity;
+            }
+        }
+
+        if (pfds[i].revents & (POLLERR | POLLHUP)) {
+            DPRINTF("netlink error → resync\n");
+            signal_netlink_sync(g);
+            changed = true;
+        }
         i++;
 
-        /* ---------- nl80211 wifi ---------- */
+        /* ---------- nl80211 ---------- */
         if (wifi_fd >= 0) {
             if (pfds[i].revents & POLLIN)
                 changed |= signal_nl80211_handle(g);
+
+            if (pfds[i].revents & (POLLERR | POLLHUP)) {
+                signal_nl80211_sync(g);
+                changed = true;
+            }
             i++;
         }
 
         /* ---------- control socket ---------- */
         if (pfds[i].revents & POLLIN) {
-            for (;;) {
-                int cfd = accept(ctl_fd, NULL, NULL);
-                if (cfd >= 0) {
-                    int r = socket_handle_client(cfd, g);
-                    changed = true;   /* socket commands may mutate graph */
-                    if (r == 0)
-                        close(cfd);
-                    continue;
-                }
+            int cfd = accept(ctl_fd, NULL, NULL);
 
-                if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
-                    break;
+            if (cfd < 0) {
+                if (errno == EINTR)
+                    continue;   /* retry poll loop */
 
                 perror("accept");
-                break;
+                continue;       /* do NOT exit daemon */
             }
+
+            DPRINTF("cfd accept: %d\n", cfd);
+
+            int r = socket_handle_client(cfd, g);
+
+            if (r == 2)          /* graph mutated */
+                changed = true;
+
+            if (r <= 0)          /* close client */
+                close(cfd);
+
+            DPRINTF("CDF Socket done\n");
+        }
+ 
+        if (pfds[i].revents & (POLLERR | POLLHUP)) {
+            perror("control socket error");
+            break;
         }
 
         /* ---------- evaluate + notify ONCE ---------- */
-        if (changed) {
-            bool state_changed = graph_evaluate(g);
-            (void)state_changed; /* silences the warning for now */
-            socket_notify_subscribers(g, /* admin_up */ true);
+        if (changed || nl_activity) {
+            graph_evaluate(g);
+            socket_notify_subscribers(g, true);
         }
-    }
-    
+    }    
     printf("lnmgrd: shutting down\n");
 
     socket_close(ctl_fd, LNMGR_SOCKET_PATH);
