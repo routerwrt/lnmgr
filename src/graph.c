@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdarg.h>
+#include <errno.h>
 
 #include "graph.h"
 #include "actions.h"
@@ -90,6 +92,22 @@ static void node_destroy(struct node *n)
 /*
  * Graph lifecycle
  */
+
+static void graph_error(struct graph *g,
+                        struct node *n,
+                        const char *fmt, ...)
+{
+    (void)g;
+
+    va_list ap;
+    va_start(ap, fmt);
+
+    fprintf(stderr, "node '%s': ", n->id);
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+
+    va_end(ap);
+}
 
 struct graph *graph_create(void)
 {
@@ -542,18 +560,31 @@ int graph_save_json(struct graph *g, int fd)
     return 0;
 }
 
+static void node_topology_reset(struct node *n)
+{
+    n->topo.master     = NULL;
+    n->topo.slaves     = NULL;
+    n->topo.slave_next = NULL;
+}
+
 int graph_features_validate(struct graph *g)
 {
     for (struct node *n = g->nodes; n; n = n->next) {
         for (struct node_feature *f = n->features; f; f = f->next) {
+
             const struct node_feature_ops *ops =
                 node_feature_ops_lookup(f->type);
 
-            if (!ops || !ops->validate)
-                continue;
-
-            if (ops->validate(n, f) < 0)
+            if (!ops) {
+                graph_error(g, n,
+                    "unknown feature type %d", f->type);
                 return -1;
+            }
+
+            if (ops->validate) {
+                if (ops->validate(g, n, f) < 0)
+                    return -1;
+            }
         }
     }
     return 0;
@@ -595,19 +626,39 @@ int graph_features_cap_check(struct graph *g)
 
 int graph_build_topology(struct graph *g)
 {
-    /* later:
-     * - bridge membership
-     * - dsa port relationships
-     * - bonds, etc
-     */
-    (void)g;
+    /* ---------- reset derived topology ---------- */
+    for (struct node *n = g->nodes; n; n = n->next)
+        node_topology_reset(n);
+
+    /* ---------- build master/slave relationships ---------- */
+    for (struct node *n = g->nodes; n; n = n->next) {
+
+        struct feat_master *fm =
+            (struct feat_master *)node_feature_find(n, FEAT_MASTER);
+
+        if (!fm)
+            continue;   /* standalone node */
+
+        /* resolve phase guarantees this */
+        if (!fm->master)
+            return -EINVAL;
+
+        struct node *master = fm->master;
+
+        /* enforce single master */
+        if (n->topo.master)
+            return -EINVAL;
+
+        /* slave → master */
+        n->topo.master = master;
+
+        /* master → slave (push front) */
+        n->topo.slave_next = master->topo.slaves;
+        master->topo.slaves = n;
+    }
 
     return 0;
 }
-
-
-
-
 
 #ifdef LNMGR_DEBUG
 void graph_debug_dump(struct graph *g)

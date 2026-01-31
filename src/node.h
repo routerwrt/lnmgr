@@ -152,8 +152,10 @@ struct feat_dsa_port {
 
 struct node_feature_ops {
     node_feature_type_t type;
+    const char         *name;
 
-    int (*validate)(struct node *n,
+    int (*validate)(struct graph *g,
+                    struct node *n,
                     struct node_feature *f);
 
     int (*resolve)(struct graph *g,
@@ -163,6 +165,20 @@ struct node_feature_ops {
     int (*cap_check)(struct graph *g,
                      struct node *n,
                      struct node_feature *f);
+};
+
+struct node_topology {
+    /* Master/slave (generic) */
+    struct node *master;        /* bridge for ports */
+    struct node *slaves;        /* linked list of ports */
+    struct node *slave_next;
+
+    /* Bridge-specific */
+    bool is_bridge;
+    bool is_bridge_port;
+
+    /* VLANs (resolved intent) */
+    struct l2_vlan *vlans;      /* bridge-wide or per-port */
 };
 
 /* ---------- descriptor ---------- */
@@ -184,6 +200,10 @@ typedef enum {
 } node_state_t;
 
 /* ---------- lookup API ---------- */
+
+struct node_feature *
+node_feature_find(struct node *n, node_feature_type_t type);
+
 const struct node_feature_ops *
 node_feature_ops_lookup(node_feature_type_t type);
 

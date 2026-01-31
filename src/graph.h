@@ -21,8 +21,11 @@ typedef enum {
 /* Internal failure classification (not user-visible) */
 typedef enum {
     FAIL_NONE = 0,
-    FAIL_CYCLE,
-    FAIL_ACTION
+
+    FAIL_CYCLE,        /* graph cycle detected */
+    FAIL_TOPOLOGY,     /* invalid structural configuration */
+    FAIL_ACTION        /* activation/deactivation failure */
+
 } fail_reason_t;
 
 /*
@@ -71,7 +74,7 @@ struct require {
 struct node {
     char                *id;
     node_kind_t         kind;
-    node_type_t         type;   /* derived from kind */
+    node_type_t         type;
     int                 have_kind;
     bool                enabled;
     bool                auto_up;
@@ -82,14 +85,14 @@ struct node {
 
     node_state_t        state;
     struct action_ops   *actions;
-    bool                activated;   /* admin-up has been performed */
+    bool                activated;
     fail_reason_t       fail_reason;
 
+    /* Traversal bookkeeping */
+    dfs_mark_t          dfs;
 
-    /* Traversal bookkeeping:
-     * - dfs: used only for cycle detection
-     */
-    dfs_mark_t          dfs;            /* cycle detection */
+    /* ---- derived topology (single source of truth) ---- */
+    struct node_topology topo;
 
     struct node         *next;
 };
