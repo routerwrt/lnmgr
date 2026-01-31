@@ -2,6 +2,11 @@
 #define LNMGR_NODE_H
 
 #include <stdbool.h>
+#include <stdint.h>
+
+struct graph;
+
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 /* ---------- semantic layer ---------- */
 
@@ -59,6 +64,107 @@ typedef enum {
 #define NKF_PRODUCES_L2 (1U << 3)
 #define NKF_PRODUCES_L3 (1U << 4)
 
+/* ------------------------------
+ * Feature system
+ * ------------------------------ */
+
+typedef enum {
+    FEAT_NONE = 0,
+
+    /* Topology intent */
+    FEAT_MASTER,         /* “this node is enslaved to <master>” */
+
+    /* L2 */
+    FEAT_BRIDGE,         /* bridge instance settings (and bridge-wide VLAN list) */
+    FEAT_BRIDGE_PORT,    /* per-port bridge VLAN membership (tagged/untagged/pvid) */
+
+    /* Optional: explicit VLAN subif / VLAN-domain concept */
+    FEAT_VLAN_DOMAIN,    /* vlan aware domain (bridge-like or standalone) */
+
+    /* DSA / switch specifics (optional, later) */
+    FEAT_DSA_PORT,       /* marks link as DSA port, cpu/user, switch id, etc. */
+
+    FEAT_MAX
+} node_feature_type_t;
+
+struct node_feature {
+    node_feature_type_t    type;
+    void                   *data;
+    struct node_feature    *next;
+};
+
+struct l2_vlan {
+    uint16_t vid;        /* 1..4094 */
+    bool     tagged;     /* false => untagged */
+    bool     pvid;       /* ingress default VLAN */
+    struct l2_vlan *next;
+};
+
+struct feat_master {
+    struct node_feature base;
+
+    /* config intent: the master node id */
+    char *master_id;
+
+    /* resolved pointer after graph build (optional) */
+    struct node *master;
+};
+
+struct feat_bridge {
+    struct node_feature base;
+
+    /* vlan filtering + default behavior (you can add knobs later) */
+    bool vlan_filtering;        /* default true for vlan-aware */
+    struct l2_vlan *vlans;      /* bridge-wide allowed VLANs / membership */
+};
+
+struct feat_bridge_port {
+    struct node_feature base;
+
+    /* per-port membership within the master bridge */
+    struct l2_vlan *vlans;      /* tagged/untagged/pvid per VID */
+};
+
+struct feat_vlan_domain {
+    struct node_feature base;
+
+    /* e.g. “lan1.100” semantics if you want a node representing a VLAN device */
+    uint16_t vid;
+    bool     reorder_hdr; /* placeholder / future */
+};
+
+struct feat_dsa_port {
+    struct node_feature base;
+
+    /* intent / classification */
+    bool is_cpu_port;          /* true for cpu@ethX */
+    bool is_user_port;         /* optional clarity */
+
+    /* topology intent */
+    char *link;                /* e.g. "eth0", "eth1" */
+                                /* NOT resolved yet */
+
+    /* optional future */
+    char *switch_id;           /* if multiple switches exist */
+};
+
+#define FEAT_CAST(_p, _type) ((struct _type *)(_p))
+
+struct node_feature_ops {
+    node_feature_type_t type;
+
+    int (*validate)(struct node *n,
+                    struct node_feature *f);
+
+    int (*resolve)(struct graph *g,
+                   struct node *n,
+                   struct node_feature *f);
+
+    int (*cap_check)(struct graph *g,
+                     struct node *n,
+                     struct node_feature *f);
+};
+
 /* ---------- descriptor ---------- */
 
 struct node_kind_desc {
@@ -78,6 +184,8 @@ typedef enum {
 } node_state_t;
 
 /* ---------- lookup API ---------- */
+const struct node_feature_ops *
+node_feature_ops_lookup(node_feature_type_t type);
 
 const struct node_kind_desc *node_kind_lookup(node_kind_t kind);
 

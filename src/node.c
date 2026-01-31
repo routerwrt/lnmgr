@@ -40,6 +40,23 @@ static const struct node_kind_desc kind_table[] = {
 
 #define KIND_TABLE_LEN (sizeof(kind_table)/sizeof(kind_table[0]))
 
+static const struct node_feature_ops feature_ops[] = {
+    /* filled incrementally */
+};
+
+const struct node_feature_ops *
+node_feature_ops_lookup(node_feature_type_t type)
+{
+    size_t n = ARRAY_SIZE(feature_ops);
+
+    for (size_t i = 0; i < n; i++) {
+        if (feature_ops[i].type == type)
+            return &feature_ops[i];
+    }
+
+    return NULL;
+}
+
 const struct node_kind_desc *node_kind_lookup(node_kind_t kind)
 {
     for (size_t i = 0; i < KIND_TABLE_LEN; i++) {

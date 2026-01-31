@@ -76,27 +76,20 @@ struct node {
     bool                enabled;
     bool                auto_up;
 
-    node_state_t        state;
     struct signal       *signals;
+    struct require      *requires;
+    struct node_feature *features;
+
+    node_state_t        state;
     struct action_ops   *actions;
     bool                activated;   /* admin-up has been performed */
     fail_reason_t       fail_reason;
-    struct require      *requires;
+
 
     /* Traversal bookkeeping:
      * - dfs: used only for cycle detection
      */
     dfs_mark_t          dfs;            /* cycle detection */
-
-    /* Topology (kernel-derived, not config intent)
-     * - master/slave relationships only
-     * - roles (bridge, port, standalone) are derived in evaluation
-    */
-    struct node         *master;
-    struct node         *slaves;
-    struct node         *slave_next;
-
-    struct l2_vlan *vlans;    /* per-port or per-bridge VLANs */
 
     struct node         *next;
 };
@@ -151,6 +144,11 @@ bool graph_set_signal(struct graph *g,
 int graph_flush(struct graph *g);
 
 int graph_save_json(struct graph *g, int fd);
+
+int graph_features_validate(struct graph *g);
+int graph_features_resolve(struct graph *g);
+int graph_features_cap_check(struct graph *g);
+int graph_build_topology(struct graph *g);
 
 #ifdef LNMGR_DEBUG
 void graph_debug_dump(struct graph *g);

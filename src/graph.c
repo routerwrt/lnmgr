@@ -60,10 +60,6 @@ static struct node *node_create(const char *id, node_kind_t kind)
     n->fail_reason = FAIL_NONE;
 
     n->requires  = NULL;
-    n->master    = NULL;
-    n->slaves    = NULL;
-    n->slave_next = NULL;
-    n->vlans     = NULL;
 
     n->actions = (struct action_ops *)action_ops_for_kind(kind);
 
@@ -545,6 +541,73 @@ int graph_save_json(struct graph *g, int fd)
     free(arr);
     return 0;
 }
+
+int graph_features_validate(struct graph *g)
+{
+    for (struct node *n = g->nodes; n; n = n->next) {
+        for (struct node_feature *f = n->features; f; f = f->next) {
+            const struct node_feature_ops *ops =
+                node_feature_ops_lookup(f->type);
+
+            if (!ops || !ops->validate)
+                continue;
+
+            if (ops->validate(n, f) < 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+
+int graph_features_resolve(struct graph *g)
+{
+    for (struct node *n = g->nodes; n; n = n->next) {
+        for (struct node_feature *f = n->features; f; f = f->next) {
+            const struct node_feature_ops *ops =
+                node_feature_ops_lookup(f->type);
+
+            if (!ops || !ops->resolve)
+                continue;
+
+            if (ops->resolve(g, n, f) < 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+
+int graph_features_cap_check(struct graph *g)
+{
+    for (struct node *n = g->nodes; n; n = n->next) {
+        for (struct node_feature *f = n->features; f; f = f->next) {
+            const struct node_feature_ops *ops =
+                node_feature_ops_lookup(f->type);
+
+            if (!ops || !ops->cap_check)
+                continue;
+
+            if (ops->cap_check(g, n, f) < 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+
+int graph_build_topology(struct graph *g)
+{
+    /* later:
+     * - bridge membership
+     * - dsa port relationships
+     * - bonds, etc
+     */
+    (void)g;
+
+    return 0;
+}
+
+
+
+
 
 #ifdef LNMGR_DEBUG
 void graph_debug_dump(struct graph *g)
