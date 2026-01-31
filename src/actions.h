@@ -2,6 +2,11 @@
 
 #include "node.h"
 
+typedef enum {
+    ACTION_OK = 0,
+    ACTION_FAIL,
+} action_result_t;
+
 struct action_ops {
     action_result_t (*activate)(struct node *n);
     void (*deactivate)(struct node *n);

@@ -42,7 +42,10 @@ SRC = \
     src/json/jsmn_impl.c \
     src/enum_str.c \
     src/signal/signal_netlink.c \
-    src/signal/signal_nl80211.c
+    src/signal/signal_nl80211.c \
+    src/kernel/kernel_link.c \
+    src/kernel/kernel_bridge.c
+
 
 DAEMON_OBJ = $(SRC:.c=.daemon.o)
 

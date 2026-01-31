@@ -131,6 +131,18 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    if (graph_prepare(g) < 0) {
+        fprintf(stderr, "invalid configuration\n");
+
+        /* mark all enabled nodes as FAILED(TOPOLOGY) */
+        for (struct node *n = g->nodes; n; n = n->next) {
+            if (n->enabled) {
+                n->state = NODE_FAILED;
+                n->fail_reason = FAIL_TOPOLOGY;
+            }
+        }
+    }
+
     /* ---------- control + signal init ---------- */
 
     int ctl_fd  = socket_listen(LNMGR_SOCKET_PATH);

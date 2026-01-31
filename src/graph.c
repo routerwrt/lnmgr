@@ -7,28 +7,7 @@
 #include "graph.h"
 #include "actions.h"
 #include "enum_str.h"
-/*
- * Internal helpers
- */
 
-static bool dfs_cycle(struct node *n)
-{
-    if (n->dfs == DFS_GRAY)
-        return true; /* back-edge → cycle */
-
-    if (n->dfs == DFS_BLACK)
-        return false;
-
-    n->dfs = DFS_GRAY;
-
-    for (struct require *r = n->requires; r; r = r->next) {
-        if (dfs_cycle(r->node))
-            return true;
-    }
-
-    n->dfs = DFS_BLACK;
-    return false;
-}
 
 static struct signal *find_signal(struct node *n, const char *name)
 {
@@ -62,8 +41,7 @@ static struct node *node_create(const char *id, node_kind_t kind)
     n->fail_reason = FAIL_NONE;
 
     n->requires  = NULL;
-
-    n->actions = (struct action_ops *)action_ops_for_kind(kind);
+    n->actions = action_ops_for_kind(n->kind);
 
     return n;
 }
@@ -336,15 +314,74 @@ int graph_disable_node(struct graph *g, const char *id)
     return 0;
 }
 
+static void node_topology_reset(struct node *n)
+{
+    n->topo.master     = NULL;
+    n->topo.slaves     = NULL;
+    n->topo.slave_next = NULL;
+}
+
+static int graph_features_validate(struct graph *g)
+{
+    for (struct node *n = g->nodes; n; n = n->next) {
+        for (struct node_feature *f = n->features; f; f = f->next) {
+
+            const struct node_feature_ops *ops =
+                node_feature_ops_lookup(f->type);
+
+            if (!ops) {
+                graph_error(g, n,
+                    "unknown feature type %d", f->type);
+                return -1;
+            }
+
+            if (ops->validate) {
+                if (ops->validate(g, n, f) < 0)
+                    return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int graph_features_resolve(struct graph *g)
+{
+    for (struct node *n = g->nodes; n; n = n->next) {
+        for (struct node_feature *f = n->features; f; f = f->next) {
+            const struct node_feature_ops *ops =
+                node_feature_ops_lookup(f->type);
+
+            if (!ops || !ops->resolve)
+                continue;
+
+            if (ops->resolve(g, n, f) < 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+
+static int graph_features_cap_check(struct graph *g)
+{
+    for (struct node *n = g->nodes; n; n = n->next) {
+        for (struct node_feature *f = n->features; f; f = f->next) {
+            const struct node_feature_ops *ops =
+                node_feature_ops_lookup(f->type);
+
+            if (!ops || !ops->cap_check)
+                continue;
+
+            if (ops->cap_check(g, n, f) < 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+
 /*
  * Evaluation logic
  *
- * NOTE:
- * 
- * - No actions yet
- * - Requirements must be ACTIVE
  */
-
 static bool requirements_met(struct node *n)
 {
     for (struct require *r = n->requires; r; r = r->next) {
@@ -363,11 +400,76 @@ static bool signals_met(struct node *n)
     return true;
 }
 
-bool graph_evaluate(struct graph *g)
+static bool graph_activate_node(struct graph *g, struct node *n)
+{
+    (void)g;
+
+    if (!n->actions || !n->actions->activate)
+        return true;
+
+    if (n->actions->activate(n) != ACTION_OK) {
+        n->state = NODE_FAILED;
+        n->fail_reason = FAIL_ACTION;
+        return false;
+    }
+
+    return true;
+}
+
+bool graph_state_machine(struct graph *g)
+{
+    bool changed = false;
+    bool progress;
+
+    do {
+        progress = false;
+
+        for (struct node *n = g->nodes; n; n = n->next) {
+            if (!n->enabled)
+                continue;
+
+            /* 1. Demotion on signal loss */
+            if (n->state == NODE_ACTIVE && !signals_met(n)) {
+                n->state = NODE_WAITING;
+                changed = progress = true;
+                continue;
+            }
+
+            /* 2. Activation (side effects, ONCE per enable-cycle) */
+            if (n->state == NODE_WAITING &&
+                requirements_met(n) &&
+                !n->activated) {
+
+                if (!graph_activate_node(g, n)) {
+                    n->state = NODE_FAILED;
+                    n->fail_reason = FAIL_ACTION;
+                    changed = true;
+                    continue;
+                }
+
+                n->activated = true;
+                progress = true;
+            }
+
+            /* 3. Readiness */
+            if (n->state == NODE_WAITING &&
+                requirements_met(n) &&
+                signals_met(n)) {
+
+                n->state = NODE_ACTIVE;
+                changed = progress = true;
+            }
+        }
+
+    } while (progress);
+
+    return changed;
+}
+
+static bool graph_apply_auto_up(struct graph *g)
 {
     bool changed = false;
 
-    /* Phase 0: auto participation */
     for (struct node *n = g->nodes; n; n = n->next) {
         if (!n->enabled || !n->auto_up)
             continue;
@@ -378,71 +480,31 @@ bool graph_evaluate(struct graph *g)
         }
     }
 
-    /* Phase 1: reset DFS marks */
-    for (struct node *n = g->nodes; n; n = n->next)
-        n->dfs = DFS_WHITE;
+    return changed;
+}
 
-    /* Cycle detection */
+static void graph_runtime_reset(struct graph *g)
+{
     for (struct node *n = g->nodes; n; n = n->next) {
-        if (n->enabled && n->dfs == DFS_WHITE) {
-            if (dfs_cycle(n)) {
-                for (struct node *m = g->nodes; m; m = m->next) {
-                    if (m->enabled && m->state != NODE_FAILED) {
-                        m->state = NODE_FAILED;
-                        m->fail_reason = FAIL_CYCLE;
-                        changed = true;
-                    }
-                }
-                return changed;
-            }
-        }
+        n->activated = false;
+
+        if (!n->enabled)
+            n->state = NODE_INACTIVE;
     }
+}
 
-    /* Phase 2+3: evaluate */
-    bool progress;
-    do {
-        progress = false;
+bool graph_evaluate(struct graph *g)
+{
+    bool changed = false;
 
-        for (struct node *n = g->nodes; n; n = n->next) {
-            if (!n->enabled)
-                continue;
+    /* Phase A: reset transient runtime state */
+    graph_runtime_reset(g);
 
-            /* Demotion on signal loss */
-            if (n->state == NODE_ACTIVE && !signals_met(n)) {
-                n->state = NODE_WAITING;
-                progress = true;
-                changed = true;
-            }
+    /* Phase B: intent → desired states */
+    changed |= graph_apply_auto_up(g);
 
-            /* Activation (runs once per enable-cycle) */
-            if (n->state == NODE_WAITING &&
-                requirements_met(n) &&
-                !n->activated) {
-
-                if (n->actions && n->actions->activate) {
-                    if (n->actions->activate(n) != ACTION_OK) {
-                        n->state = NODE_FAILED;
-                        n->fail_reason = FAIL_ACTION;
-                        changed = true;
-                        continue;
-                    }
-                }
-
-                n->activated = true;
-            }
-
-            /* Readiness */
-            if (n->state == NODE_WAITING &&
-                requirements_met(n) &&
-                signals_met(n)) {
-
-                n->state = NODE_ACTIVE;
-                progress = true;
-                changed = true;
-            }
-        }
-
-    } while (progress);
+    /* Phase C: state machine + actions */
+    changed |= graph_state_machine(g);
 
     return changed;
 }
@@ -560,71 +622,7 @@ int graph_save_json(struct graph *g, int fd)
     return 0;
 }
 
-static void node_topology_reset(struct node *n)
-{
-    n->topo.master     = NULL;
-    n->topo.slaves     = NULL;
-    n->topo.slave_next = NULL;
-}
-
-int graph_features_validate(struct graph *g)
-{
-    for (struct node *n = g->nodes; n; n = n->next) {
-        for (struct node_feature *f = n->features; f; f = f->next) {
-
-            const struct node_feature_ops *ops =
-                node_feature_ops_lookup(f->type);
-
-            if (!ops) {
-                graph_error(g, n,
-                    "unknown feature type %d", f->type);
-                return -1;
-            }
-
-            if (ops->validate) {
-                if (ops->validate(g, n, f) < 0)
-                    return -1;
-            }
-        }
-    }
-    return 0;
-}
-
-int graph_features_resolve(struct graph *g)
-{
-    for (struct node *n = g->nodes; n; n = n->next) {
-        for (struct node_feature *f = n->features; f; f = f->next) {
-            const struct node_feature_ops *ops =
-                node_feature_ops_lookup(f->type);
-
-            if (!ops || !ops->resolve)
-                continue;
-
-            if (ops->resolve(g, n, f) < 0)
-                return -1;
-        }
-    }
-    return 0;
-}
-
-int graph_features_cap_check(struct graph *g)
-{
-    for (struct node *n = g->nodes; n; n = n->next) {
-        for (struct node_feature *f = n->features; f; f = f->next) {
-            const struct node_feature_ops *ops =
-                node_feature_ops_lookup(f->type);
-
-            if (!ops || !ops->cap_check)
-                continue;
-
-            if (ops->cap_check(g, n, f) < 0)
-                return -1;
-        }
-    }
-    return 0;
-}
-
-int graph_build_topology(struct graph *g)
+static int graph_build_topology(struct graph *g)
 {
     /* ---------- reset derived topology ---------- */
     for (struct node *n = g->nodes; n; n = n->next)
@@ -655,6 +653,241 @@ int graph_build_topology(struct graph *g)
         /* master → slave (push front) */
         n->topo.slave_next = master->topo.slaves;
         master->topo.slaves = n;
+    }
+
+    return 0;
+}
+
+static int graph_validate_topology(struct graph *g)
+{
+    /* ---------- basic topology sanity ---------- */
+    for (struct node *n = g->nodes; n; n = n->next) {
+
+        /* A bridge must not have a master */
+        if (n->topo.is_bridge && n->topo.master) {
+            n->fail_reason = FAIL_TOPOLOGY;
+            return -EINVAL;
+        }
+
+        /* A bridge port must have a master */
+        if (n->topo.is_bridge_port && !n->topo.master) {
+            n->fail_reason = FAIL_TOPOLOGY;
+            return -EINVAL;
+        }
+
+        /* A node with a master must be a bridge port */
+        if (n->topo.master && !n->topo.is_bridge_port) {
+            n->fail_reason = FAIL_TOPOLOGY;
+            return -EINVAL;
+        }
+
+        /* A bridge port’s master must be a bridge */
+        if (n->topo.master && !n->topo.master->topo.is_bridge) {
+            n->fail_reason = FAIL_TOPOLOGY;
+            return -EINVAL;
+        }
+    }
+
+    /* ---------- detect master/slave cycles ---------- */
+    for (struct node *n = g->nodes; n; n = n->next) {
+        struct node *slow = n;
+        struct node *fast = n;
+
+        while (fast && fast->topo.master) {
+            slow = slow->topo.master;
+            fast = fast->topo.master;
+            if (fast)
+                fast = fast->topo.master;
+
+            if (slow == fast) {
+                n->fail_reason = FAIL_TOPOLOGY;
+                return -EINVAL;
+            }
+        }
+    }
+
+    return 0;
+}
+
+static struct l2_vlan *
+vlan_find(struct l2_vlan *list, uint16_t vid)
+{
+    for (; list; list = list->next)
+        if (list->vid == vid)
+            return list;
+    return NULL;
+}
+
+static int
+vlan_inherit_from_bridge(struct node *port, struct node *bridge)
+{
+    for (struct l2_vlan *bv = bridge->topo.vlans; bv; bv = bv->next) {
+
+        if (vlan_find(port->topo.vlans, bv->vid))
+            continue;
+
+        struct l2_vlan *v = calloc(1, sizeof(*v));
+        if (!v)
+            return -ENOMEM;
+
+        *v = *bv;
+        v->pvid = false;
+        v->inherited = true;
+
+        v->next = port->topo.vlans;
+        port->topo.vlans = v;
+    }
+
+    return 0;
+}
+
+static int
+vlan_apply_port_overrides(struct node *port,
+                          struct feat_bridge_port *bp,
+                          struct node *bridge)
+{
+    (void)bridge;
+    
+    for (struct l2_vlan *pv = bp->vlans; pv; pv = pv->next) {
+
+        struct l2_vlan *v = vlan_find(port->topo.vlans, pv->vid);
+        if (!v)
+            return FAIL_TOPOLOGY;   /* port introduces unknown VLAN */
+
+        v->tagged = pv->tagged;
+        v->pvid   = pv->pvid;
+        v->inherited = false;
+    }
+
+    return 0;
+}
+
+static int
+vlan_resolve_pvid(struct node *port)
+{
+    struct l2_vlan *pvid = NULL;
+
+    for (struct l2_vlan *v = port->topo.vlans; v; v = v->next) {
+
+        if (v->tagged && v->pvid)
+            return FAIL_TOPOLOGY;
+
+        if (v->pvid) {
+            if (pvid)
+                return FAIL_TOPOLOGY;
+            pvid = v;
+        }
+    }
+
+    if (!pvid) {
+        for (struct l2_vlan *v = port->topo.vlans; v; v = v->next) {
+            if (!v->tagged) {
+                v->pvid = true;
+                pvid = v;
+                break;
+            }
+        }
+    }
+
+    if (!pvid)
+        return FAIL_TOPOLOGY;
+
+    return 0;
+}
+
+static int graph_resolve_vlans(struct graph *g)
+{
+    for (struct node *n = g->nodes; n; n = n->next) {
+
+        if (!n->topo.is_bridge_port)
+            continue;
+
+        struct node *br = n->topo.master;
+        struct feat_bridge_port *bp =
+            (struct feat_bridge_port *)node_feature_find(n, FEAT_BRIDGE_PORT);
+
+        int r;
+
+        r = vlan_inherit_from_bridge(n, br);
+        if (r) return r;
+
+        if (bp) {
+            r = vlan_apply_port_overrides(n, bp, br);
+            if (r) return r;
+        }
+
+        r = vlan_resolve_pvid(n);
+        if (r) return r;
+    }
+
+    return 0;
+}
+
+int graph_prepare(struct graph *g)
+{
+    int r;
+
+    /* --------------------------------------------------
+     * Phase 0: reset derived / runtime state
+     * -------------------------------------------------- */
+    for (struct node *n = g->nodes; n; n = n->next) {
+        n->fail_reason = FAIL_NONE;
+        node_topology_reset(n);
+    }
+
+    /* --------------------------------------------------
+     * Phase 1: feature-level validation (pure intent)
+     * -------------------------------------------------- */
+    r = graph_features_validate(g);
+    if (r)
+        return r;   /* config error, nothing to mark yet */
+
+    /* --------------------------------------------------
+     * Phase 2: feature resolution (IDs → pointers)
+     * -------------------------------------------------- */
+    r = graph_features_resolve(g);
+    if (r)
+        return r;   /* missing references, fatal */
+
+    /* --------------------------------------------------
+     * Phase 3: capability checks (kernel / platform)
+     * -------------------------------------------------- */
+    r = graph_features_cap_check(g);
+    if (r)
+        return r;   /* unsupported feature */
+
+    /* --------------------------------------------------
+     * Phase 4: build derived topology
+     * -------------------------------------------------- */
+    r = graph_build_topology(g);
+    if (r)
+        return r;   /* internal inconsistency */
+
+    /* --------------------------------------------------
+     * Phase 5: topology validation
+     * (THIS is where FAIL_* is assigned)
+     * -------------------------------------------------- */
+    r = graph_validate_topology(g);
+    if (r) {
+        for (struct node *n = g->nodes; n; n = n->next) {
+            if (n->fail_reason != FAIL_NONE)
+                n->state = NODE_FAILED;
+        }
+        return r;
+    }
+
+    /* --------------------------------------------------
+     * Phase 6: VLAN resolution (derived intent)
+     * -------------------------------------------------- */
+    r = graph_resolve_vlans(g);
+    if (r) {
+        for (struct node *n = g->nodes; n; n = n->next) {
+            if (n->state != NODE_FAILED) {
+                n->state = NODE_FAILED;
+                n->fail_reason = FAIL_TOPOLOGY;
+            }
+        }
+        return r;
     }
 
     return 0;

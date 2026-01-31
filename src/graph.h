@@ -5,18 +5,13 @@
 #include <stddef.h>
 
 #include "node.h"
+#include "actions.h"
 
 #ifdef LNMGR_DEBUG
 #define DPRINTF(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__)
 #else
 #define DPRINTF(fmt, ...) do {} while (0)
 #endif
-
-typedef enum {
-    DFS_WHITE = 0,
-    DFS_GRAY,
-    DFS_BLACK
-} dfs_mark_t;
 
 /* Internal failure classification (not user-visible) */
 typedef enum {
@@ -41,11 +36,6 @@ typedef enum {
     EXPLAIN_SIGNAL,
     EXPLAIN_FAILED
 } explain_type_t;
-
-typedef enum {
-    ACTION_OK = 0,
-    ACTION_FAIL
-} action_result_t;
 
 struct explain {
     explain_type_t type;
@@ -84,12 +74,9 @@ struct node {
     struct node_feature *features;
 
     node_state_t        state;
-    struct action_ops   *actions;
+    const struct action_ops *actions;
     bool                activated;
     fail_reason_t       fail_reason;
-
-    /* Traversal bookkeeping */
-    dfs_mark_t          dfs;
 
     /* ---- derived topology (single source of truth) ---- */
     struct node_topology topo;
@@ -130,7 +117,10 @@ int graph_del_require(struct graph *g,
 int graph_enable_node(struct graph *g, const char *id);
 int graph_disable_node(struct graph *g, const char *id);
 
-/* evaluation */
+int graph_prepare(struct graph *g);
+
+bool graph_state_machine(struct graph *g);
+
 bool graph_evaluate(struct graph *g);
 
 struct explain graph_explain_node(struct graph *g, const char *id);
@@ -147,11 +137,6 @@ bool graph_set_signal(struct graph *g,
 int graph_flush(struct graph *g);
 
 int graph_save_json(struct graph *g, int fd);
-
-int graph_features_validate(struct graph *g);
-int graph_features_resolve(struct graph *g);
-int graph_features_cap_check(struct graph *g);
-int graph_build_topology(struct graph *g);
 
 #ifdef LNMGR_DEBUG
 void graph_debug_dump(struct graph *g);

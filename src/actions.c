@@ -1,68 +1,14 @@
-#include <string.h>
-#include <unistd.h>
-#include <errno.h>
-#include <sys/socket.h>
-
-#include <linux/netlink.h>
-#include <linux/rtnetlink.h>
-#include <linux/if.h>
-
 #include "graph.h"
 #include "actions.h"
 
-static int rtnl_set_link_updown(const char *ifname, bool up)
-{
-    struct {
-        struct nlmsghdr nh;
-        struct ifinfomsg ifm;
-        char attrbuf[256];
-    } req = {0};
-
-    int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
-    if (fd < 0)
-        return -1;
-
-    req.nh.nlmsg_len   = NLMSG_LENGTH(sizeof(struct ifinfomsg));
-    req.nh.nlmsg_type  = RTM_SETLINK;
-    req.nh.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-
-    req.ifm.ifi_family = AF_UNSPEC;
-    req.ifm.ifi_change = IFF_UP;
-    req.ifm.ifi_flags  = up ? IFF_UP : 0;
-
-    struct rtattr *rta = (struct rtattr *)req.attrbuf;
-    rta->rta_type = IFLA_IFNAME;
-    rta->rta_len  = RTA_LENGTH(strlen(ifname) + 1);
-    strcpy(RTA_DATA(rta), ifname);
-
-    req.nh.nlmsg_len += RTA_LENGTH(strlen(ifname) + 1);
-
-    struct sockaddr_nl sa = {
-        .nl_family = AF_NETLINK
-    };
-
-    if (sendto(fd, &req, req.nh.nlmsg_len, 0,
-               (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-        close(fd);
-        return -1;
-    }
-
-    /* wait for ACK */
-    char buf[4096];
-    if (recv(fd, buf, sizeof(buf), 0) < 0) {
-        close(fd);
-        return -1;
-    }
-
-    close(fd);
-    return 0;
-}
+#include "kernel/kernel_link.h"
+#include "kernel/kernel_bridge.h"
 
 /* ---- DEVICE ---- */
 
 static action_result_t device_activate(struct node *n)
 {
-    if (rtnl_set_link_updown(n->id, true) < 0)
+    if (kernel_link_set_updown(n->id, true) < 0)
         return ACTION_FAIL;
 
     return ACTION_OK;
@@ -70,31 +16,31 @@ static action_result_t device_activate(struct node *n)
 
 static void device_deactivate(struct node *n)
 {
-    rtnl_set_link_updown(n->id, false);
+    kernel_link_set_updown(n->id, false);
 }
-
-static const struct action_ops device_ops = {
-    .activate = device_activate,
-    .deactivate = device_deactivate,
-};
 
 /* ---- BRIDGE ---- */
 
 static action_result_t bridge_activate(struct node *n)
 {
-    (void)n;
+    struct feat_bridge *fb = (struct feat_bridge *)
+                        node_feature_find(n, FEAT_BRIDGE);
+
+    if (!kernel_link_exists(n->id))
+        kernel_bridge_create(n->id);
+
+    if (fb->vlan_filtering)
+        kernel_bridge_set_vlan_filtering(n->id, true);
+
+    kernel_link_set_up(n->id);
     return ACTION_OK;
 }
+
 
 static void bridge_deactivate(struct node *n)
 {
     (void)n;
 }
-
-static const struct action_ops bridge_ops = {
-    .activate = bridge_activate,
-    .deactivate = bridge_deactivate,
-};
 
 /* ---- BOND ---- */
 
@@ -109,12 +55,73 @@ static void bond_deactivate(struct node *n)
     (void)n;
 }
 
+/* ---- BRIDGE PORT ---- */
+
+static action_result_t bridge_port_activate(struct node *n)
+{
+    struct feat_master *fm = (struct feat_master *)
+                node_feature_find(n, FEAT_MASTER);
+
+    if (!fm || !fm->master)
+        return ACTION_FAIL;
+
+    struct node *br = fm->master;
+
+    /* Bridge must be a bridge */
+    if (!br->topo.is_bridge)
+        return ACTION_FAIL;
+
+    /* 1. Enslave port to bridge (idempotent) */
+    if (kernel_bridge_add_port(br->id, n->id) < 0)
+        return ACTION_FAIL;
+
+    /* 2. Ensure port admin UP */
+    if (!kernel_link_is_up(n->id)) {
+        if (kernel_link_set_up(n->id) < 0)
+            return ACTION_FAIL;
+    }
+
+    /* 3. Program VLANs (resolved intent) */
+    for (struct l2_vlan *v = n->topo.vlans; v; v = v->next) {
+
+        /* Skip inherited-only entries if you ever add that flag */
+        /* if (v->inherited)
+            continue; */
+
+        if (kernel_bridge_vlan_add(
+                br->id,
+                n->id,
+                v->vid,
+                v->tagged,
+                v->pvid) < 0)
+            return ACTION_FAIL;
+    }
+
+    return ACTION_OK;
+}
+
+static const struct action_ops device_ops = {
+    .activate = device_activate,
+    .deactivate = device_deactivate,
+};
+
+static const struct action_ops bridge_ops = {
+    .activate = bridge_activate,
+    .deactivate = bridge_deactivate,
+};
+
 static const struct action_ops bond_ops = {
     .activate = bond_activate,
     .deactivate = bond_deactivate,
 };
 
-const struct action_ops *action_ops_for_kind(node_kind_t kind)
+static const struct action_ops bridge_port_ops = {
+    .activate   = bridge_port_activate,
+    .deactivate = NULL,   /* kernel handles teardown */
+};
+
+const struct action_ops *
+action_ops_for_kind(node_kind_t kind)
 {
     switch (kind) {
     case KIND_LINK_ETHERNET:
@@ -124,6 +131,9 @@ const struct action_ops *action_ops_for_kind(node_kind_t kind)
 
     case KIND_L2_BRIDGE:
         return &bridge_ops;
+
+    case KIND_L2_BRIDGE_PORT:
+        return &bridge_port_ops;
 
     case KIND_L2_BOND:
         return &bond_ops;

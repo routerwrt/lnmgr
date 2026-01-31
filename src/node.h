@@ -34,6 +34,7 @@ typedef enum {
 
     /* L2 */
     KIND_L2_BRIDGE,
+    KIND_L2_BRIDGE_PORT,
     KIND_L2_BOND,
     KIND_L2_TEAM,
     KIND_L2_LAG,
@@ -63,6 +64,21 @@ typedef enum {
 #define NKF_HAS_IP      (1U << 2)
 #define NKF_PRODUCES_L2 (1U << 3)
 #define NKF_PRODUCES_L3 (1U << 4)
+
+enum node_kind_flags {
+    KF_NONE            = 0,
+
+    /* Topology semantics */
+    KF_CAN_HAVE_MASTER = 1 << 0,   /* e.g. bridge ports */
+    KF_CAN_HAVE_SLAVES = 1 << 1,   /* e.g. bridges, bonds */
+
+    /* L2 / VLAN semantics */
+    KF_VLAN_AWARE      = 1 << 2,   /* understands VLANs */
+    KF_NEEDS_BRIDGE   = 1 << 3,   /* must be enslaved */
+
+    /* Lifecycle semantics */
+    KF_IDEMPOTENT_UP   = 1 << 4,   /* safe to "activate" when already up */
+};
 
 /* ------------------------------
  * Feature system
@@ -97,6 +113,7 @@ struct l2_vlan {
     uint16_t vid;        /* 1..4094 */
     bool     tagged;     /* false => untagged */
     bool     pvid;       /* ingress default VLAN */
+    bool     inherited;   /* true if inherited from bridge */
     struct l2_vlan *next;
 };
 
@@ -184,9 +201,9 @@ struct node_topology {
 /* ---------- descriptor ---------- */
 
 struct node_kind_desc {
-    node_kind_t   kind;
-    node_type_t   type;
-    const char   *name;   /* config / JSON name */
+    node_kind_t kind;
+    const char *name;
+    node_type_t type;
     unsigned int  flags;
 };
 
