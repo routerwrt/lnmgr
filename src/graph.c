@@ -106,7 +106,6 @@ void graph_destroy(struct graph *g)
 /*
  * Node management
  */
-
 struct node *graph_find_node(struct graph *g, const char *id)
 {
     for (struct node *n = g->nodes; n; n = n->next) {
@@ -466,18 +465,39 @@ bool graph_state_machine(struct graph *g)
     return changed;
 }
 
+/*
+ * Auto-up semantics:
+ * - One-shot per kernel lifecycle
+ * - No retries
+ * - No admin override
+ */
 static bool graph_apply_auto_up(struct graph *g)
 {
     bool changed = false;
 
     for (struct node *n = g->nodes; n; n = n->next) {
-        if (!n->enabled || !n->auto_up)
+
+        if (!n->enabled)
             continue;
 
-        if (n->state == NODE_INACTIVE) {
-            n->state = NODE_WAITING;
-            changed = true;
-        }
+        if (!n->auto_up)
+            continue;
+
+        if (!n->present)
+            continue;
+
+        if (n->auto_latched)
+            continue;
+
+        if (n->state != NODE_INACTIVE)
+            continue;
+
+        /*
+         * One-shot auto activation attempt for this lifecycle
+         */
+        n->state = NODE_WAITING;
+        n->auto_latched = true;
+        changed = true;
     }
 
     return changed;

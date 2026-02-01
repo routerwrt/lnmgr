@@ -290,3 +290,40 @@ static int feat_bridge_port_resolve(struct graph *g,
 
     return 0;
 }
+
+void node_on_present(struct node *n)
+{
+    if (n->present)
+        return;   /* no edge */
+
+    n->present = true;
+
+    /*
+     * New lifecycle starts.
+     * Auto-up is allowed again exactly once.
+     */
+    n->auto_latched = false;
+    n->activated    = false;
+
+    /*
+     * DO NOT touch n->state here.
+     * Promotion out of NODE_INACTIVE is handled
+     * exclusively by graph_apply_auto_up().
+     */
+}
+
+void node_on_absent(struct node *n)
+{
+    if (!n->present)
+        return;   /* no edge */
+
+    n->present = false;
+
+    /*
+     * Lifecycle ends.
+     * Node is no longer eligible for evaluation.
+     */
+    n->auto_latched = false;
+    n->activated    = false;
+    n->state        = NODE_INACTIVE;
+}

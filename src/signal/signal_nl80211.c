@@ -179,6 +179,10 @@ bool signal_nl80211_handle(struct graph *g)
         if (!have_ifname)
             continue;
 
+        struct node *n = graph_find_node(g, ifname);
+        if (!n || !n->present)
+            continue;
+
         switch (genl->cmd) {
 
         /* --- AP events --- */

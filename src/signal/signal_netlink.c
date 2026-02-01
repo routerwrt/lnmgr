@@ -14,6 +14,7 @@
 
 #include "signal_netlink.h"
 #include "graph.h"
+#include "node.h"
 
 /* private netlink socket */
 static int nl_fd = -1;
@@ -82,6 +83,17 @@ static bool clear_link_state(struct graph *g, const char *ifname)
 {
     bool changed = false;
 
+    struct node *n = graph_find_node(g, ifname);
+    if (!n)
+        return false;
+
+    /* ---- absence edge ---- */
+    if (n->present) {
+        node_on_absent(n);
+        changed = true;
+    }
+
+    /* ---- signals ---- */
     changed |= graph_set_signal(g, ifname, "carrier",  false);
     changed |= graph_set_signal(g, ifname, "admin_up", false);
     changed |= graph_set_signal(g, ifname, "running",  false);
@@ -95,6 +107,17 @@ static bool apply_link_state(struct graph *g,
 {
     bool changed = false;
 
+    struct node *n = graph_find_node(g, ifname);
+    if (!n)
+        return false;
+
+    /* ---- presence edge ---- */
+    if (!n->present) {
+        node_on_present(n);
+        changed = true;
+    }
+
+    /* ---- signals ---- */
     changed |= graph_set_signal(g, ifname, "carrier",
                                 !!(flags & IFF_LOWER_UP));
     changed |= graph_set_signal(g, ifname, "admin_up",
@@ -110,6 +133,7 @@ static bool apply_link_state(struct graph *g,
 
     return changed;
 }
+
 /* ------------------------------------------------------------ */
 
 int signal_netlink_fd(void)

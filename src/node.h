@@ -228,4 +228,9 @@ const struct node_kind_desc *node_kind_lookup(node_kind_t kind);
 
 const struct node_kind_desc *node_kind_lookup_name(const char *name);
 
+void node_on_present(struct node *n);
+
+void node_on_absent(struct node *n);
+
+
 #endif /* LNMGR_NODE_H */

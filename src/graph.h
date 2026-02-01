@@ -67,7 +67,11 @@ struct node {
     node_type_t         type;
     int                 have_kind;
     bool                enabled;
+ 
     bool                auto_up;
+    bool present;        /* kernel presence */
+    bool auto_latched;   /* auto-up already attempted this lifecycle */
+    bool                activated;
 
     struct signal       *signals;
     struct require      *requires;
@@ -75,7 +79,6 @@ struct node {
 
     node_state_t        state;
     const struct action_ops *actions;
-    bool                activated;
     fail_reason_t       fail_reason;
 
     /* ---- derived topology (single source of truth) ---- */
