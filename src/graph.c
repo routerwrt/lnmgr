@@ -35,6 +35,9 @@ static struct node *node_create(const char *id, node_kind_t kind)
     n->kind      = kind;
     n->type      = kd->type;
 
+    n->auto_up      = false;
+    n->present      = false;
+    n->auto_latched = false;
     n->enabled   = false;
     n->state     = NODE_INACTIVE;
     n->activated = false;
