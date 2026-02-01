@@ -1,27 +1,43 @@
 {
+  "version": 1,
   "nodes": [
     {
       "id": "br-lan",
       "type": "bridge",
-      "vlans": [100, 200]
+      "enabled": true,
+      "auto": true,
+      "bridge": {
+        "vlans": [
+          { "vid": 100 },
+          { "vid": 200 }
+        ]
+      }
     },
     {
       "id": "lan1",
       "type": "ethernet",
-      "bridge": "br-lan",
-      "bridge_vlans": [
-        { "vid": 100, "tagged": false, "pvid": true },
-        { "vid": 200, "tagged": true }
-      ]
+      "enabled": true,
+      "auto": true,
+      "master": "br-lan",
+      "bridge-port": {
+        "vlans": [
+          { "vid": 100, "pvid": true, "tagged": false },
+          { "vid": 200, "tagged": true }
+        ]
+      }
     },
     {
       "id": "lan2",
       "type": "ethernet",
-      "bridge": "br-lan",
-      "bridge_vlans": [
-        { "vid": 100, "tagged": true },
-        { "vid": 200, "tagged": true }
-      ]
+      "enabled": true,
+      "auto": true,
+      "master": "br-lan",
+      "bridge-port": {
+        "vlans": [
+          { "vid": 100, "tagged": true },
+          { "vid": 200, "tagged": true }
+        ]
+      }
     }
   ]
 }

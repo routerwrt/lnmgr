@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "id": "eth0",
+      "type": "ethernet",
+      "enabled": true,
+      "auto": true
+    },
+    {
+      "id": "eth0.100",
+      "type": "vlan",
+      "enabled": true,
+      "auto": true,
+      "parent": "eth0",
+      "vid": 100
+    },
+    {
+      "id": "eth0.200",
+      "type": "vlan",
+      "enabled": true,
+      "auto": true,
+      "parent": "eth0",
+      "vid": 200
+    }
+  ]
+}
